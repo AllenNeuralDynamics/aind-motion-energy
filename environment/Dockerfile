@@ -7,7 +7,5 @@ ARG GIT_ASKPASS
 ARG GIT_ACCESS_TOKEN
 COPY git-askpass /
 
-RUN pip install -U --no-cache-dir \
-    aind-video-utils>=0.3.1 \
-    numpy>=1.26 \
-    tqdm>=4.0
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install -U --no-cache-dir -r /tmp/requirements.txt
