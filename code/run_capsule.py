@@ -26,9 +26,10 @@ def run():
         return
 
     for video in videos:
-        me, meta = compute_motion_energy(video)
+        me, avg_map, meta = compute_motion_energy(video)
         stem = video.stem
         np.save(RESULTS_DIR / f"{stem}_motion_energy.npy", me)
+        np.save(RESULTS_DIR / f"{stem}_motion_energy_map.npy", avg_map)
         with open(RESULTS_DIR / f"{stem}_me_metadata.json", "w") as f:
             json.dump(meta, f, indent=2)
         print(f"{stem}: {len(me)} frames | max={me.max():.4f} | mean={me.mean():.4f}")

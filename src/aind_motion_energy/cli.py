@@ -51,11 +51,11 @@ def main() -> None:
         return
 
     for video in videos:
-        me, meta = compute_motion_energy(video, roi=roi, normalize=not args.no_normalize)
+        me, avg_map, meta = compute_motion_energy(video, roi=roi, normalize=not args.no_normalize)
         stem = video.stem
 
-        if args.format in ("npy", "both"):
-            np.save(args.output / f"{stem}_motion_energy.npy", me)
+        np.save(args.output / f"{stem}_motion_energy.npy", me)
+        np.save(args.output / f"{stem}_motion_energy_map.npy", avg_map)
 
         if args.format in ("csv", "both"):
             import csv

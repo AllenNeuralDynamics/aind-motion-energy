@@ -11,20 +11,26 @@ def compute_motion_energy(
     video_path: Path,
     roi: Optional[Tuple[int, int, int, int]] = None,
     normalize: bool = True,
-) -> Tuple[np.ndarray, dict]:
+) -> Tuple[np.ndarray, np.ndarray, dict]:
     """Compute motion energy as the sum of absolute frame-to-frame differences.
 
     Standard for animal behavior analysis (e.g. Musall et al. 2019).
-    Returns (motion_energy, metadata):
-      - motion_energy: float32 array of shape (n_frames - 1,)
+    Returns (motion_energy, avg_map, metadata):
+      - motion_energy: float32 array of shape (n_frames - 1,), one scalar per frame pair
+      - avg_map: float32 array of shape (H, W), mean absolute difference per pixel
       - metadata: dict with video properties and processing parameters
     """
     video_path = Path(video_path)
     info = get_video_info(video_path)
 
-    pixel_count = (roi[2] * roi[3]) if roi else (info["width"] * info["height"])
+    out_h = roi[3] if roi else info["height"]
+    out_w = roi[2] if roi else info["width"]
+    pixel_count = out_w * out_h
+
     me_values = []
+    map_accumulator = np.zeros((out_h, out_w), dtype=np.float64)
     prev_frame = None
+    frames_read = 0
 
     for frame in tqdm(
         iter_luma_frames(video_path, roi=roi),
@@ -34,18 +40,25 @@ def compute_motion_energy(
     ):
         frame_f = frame.astype(np.float32)
         if prev_frame is not None:
-            me_values.append(np.abs(frame_f - prev_frame).sum())
+            diff = np.abs(frame_f - prev_frame)
+            me_values.append(diff.sum())
+            map_accumulator += diff
         prev_frame = frame_f
+        frames_read += 1
 
     me = np.array(me_values, dtype=np.float32)
+    n_diffs = len(me)
+
+    # average map: mean absolute difference at each pixel across all frame pairs
+    avg_map = (map_accumulator / n_diffs).astype(np.float32)
 
     if normalize:
         me /= pixel_count
 
     metadata = {
         "video_path": str(video_path),
-        "n_frames": info["n_frames"],
-        "n_me_frames": len(me),
+        "n_frames_decoded": frames_read,
+        "n_me_frames": n_diffs,
         "fps": info["fps"],
         "width": info["width"],
         "height": info["height"],
@@ -55,4 +68,4 @@ def compute_motion_energy(
         "pixel_count": pixel_count,
     }
 
-    return me, metadata
+    return me, avg_map, metadata
