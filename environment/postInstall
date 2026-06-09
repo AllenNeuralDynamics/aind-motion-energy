@@ -1,0 +1,4 @@
+#!/bin/bash
+# Runs after pip install in Code Ocean
+# ffmpeg is available in Code Ocean's base image
+pip install -e /code

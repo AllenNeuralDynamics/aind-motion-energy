@@ -1,0 +1,7 @@
+#!/bin/bash
+# Code Ocean entry point
+# Data is mounted at /data, outputs go to /results
+set -euo pipefail
+python -m aind_motion_energy.cli \
+    --input /data \
+    --output /results

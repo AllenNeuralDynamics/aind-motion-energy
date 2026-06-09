@@ -1,0 +1,33 @@
+[project]
+name = "aind-motion-energy"
+version = "0.1.0"
+description = "Motion energy computation from behavior videos for neuroscience pipelines"
+readme = "README.md"
+authors = [
+    { name = "1mattbecker", email = "105821807+1mattbecker@users.noreply.github.com" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "aind-video-utils>=0.1.0",
+    "numpy>=1.26",
+    "tqdm>=4.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+]
+
+[project.scripts]
+aind-motion-energy = "aind_motion_energy.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.11.19,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+    "pytest-cov>=7.1.0",
+]
