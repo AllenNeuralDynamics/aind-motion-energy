@@ -1,4 +1,0 @@
-#!/usr/bin/env bash
-set -ex
-export PYTHONPATH="${PYTHONPATH}:/code/src"
-python -u run_capsule.py "$@"
