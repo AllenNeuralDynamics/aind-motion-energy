@@ -1,0 +1,109 @@
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import numpy as np
+import pytest
+
+from aind_motion_energy.io import get_video_info, iter_luma_frames
+
+
+def _fake_probe(fps="500/1"):
+    return {"streams": [{"r_frame_rate": fps}]}
+
+
+@patch("aind_motion_energy.io.get_video_range_info")
+@patch("aind_motion_energy.io.get_nb_frames")
+@patch("aind_motion_energy.io.get_frame_dimensions")
+@patch("aind_motion_energy.io.probe")
+def test_get_video_info_parses_fields(mock_probe, mock_dims, mock_nb, mock_range):
+    mock_probe.return_value = _fake_probe("500/1")
+    mock_dims.return_value = (720, 540)
+    mock_nb.return_value = 15000
+    mock_range.return_value = ("tv", 8)
+
+    info = get_video_info(Path("fake.mp4"))
+
+    assert info["width"] == 720
+    assert info["height"] == 540
+    assert info["n_frames"] == 15000
+    assert info["fps"] == pytest.approx(500.0)
+    assert info["bit_depth"] == 8
+
+
+@patch("aind_motion_energy.io.get_video_range_info")
+@patch("aind_motion_energy.io.get_nb_frames")
+@patch("aind_motion_energy.io.get_frame_dimensions")
+@patch("aind_motion_energy.io.probe")
+def test_get_video_info_fractional_fps(mock_probe, mock_dims, mock_nb, mock_range):
+    mock_probe.return_value = _fake_probe("60000/1001")
+    mock_dims.return_value = (1920, 1080)
+    mock_nb.return_value = 1000
+    mock_range.return_value = ("tv", 8)
+
+    info = get_video_info(Path("fake.mp4"))
+
+    assert abs(info["fps"] - 59.94) < 0.01
+
+
+@patch("aind_motion_energy.io.get_video_info")
+@patch("aind_motion_energy.io.subprocess.Popen")
+def test_iter_luma_frames_yields_correct_shape(mock_popen, mock_info):
+    H, W = 3, 4
+    mock_info.return_value = {"width": W, "height": H, "n_frames": 2,
+                              "fps": 30.0, "bit_depth": 8, "color_range": "tv"}
+
+    frame1 = np.zeros(H * W, dtype=np.uint8).tobytes()
+    frame2 = np.ones(H * W, dtype=np.uint8).tobytes()
+    mock_proc = MagicMock()
+    mock_proc.stdout.read.side_effect = [frame1, frame2, b""]
+    mock_popen.return_value = mock_proc
+
+    frames = list(iter_luma_frames(Path("fake.mp4")))
+
+    assert len(frames) == 2
+    assert frames[0].shape == (H, W)
+    assert frames[0].dtype == np.uint8
+    assert frames[1].sum() == H * W  # all ones
+
+
+@patch("aind_motion_energy.io.get_video_info")
+@patch("aind_motion_energy.io.subprocess.Popen")
+def test_iter_luma_frames_roi_injects_crop_filter(mock_popen, mock_info):
+    H, W = 10, 10
+    roi = (2, 2, 4, 3)
+    roi_w, roi_h = roi[2], roi[3]
+    mock_info.return_value = {"width": W, "height": H, "n_frames": 1,
+                              "fps": 30.0, "bit_depth": 8, "color_range": "tv"}
+
+    frame = np.zeros(roi_h * roi_w, dtype=np.uint8).tobytes()
+    mock_proc = MagicMock()
+    mock_proc.stdout.read.side_effect = [frame, b""]
+    mock_popen.return_value = mock_proc
+
+    frames = list(iter_luma_frames(Path("fake.mp4"), roi=roi))
+
+    assert len(frames) == 1
+    assert frames[0].shape == (roi_h, roi_w)
+
+    cmd = mock_popen.call_args[0][0]
+    vf_arg = cmd[cmd.index("-vf") + 1]
+    assert f"crop={roi_w}:{roi_h}:{roi[0]}:{roi[1]}" in vf_arg
+
+
+@patch("aind_motion_energy.io.get_video_info")
+@patch("aind_motion_energy.io.subprocess.Popen")
+def test_iter_luma_frames_no_roi_uses_format_only(mock_popen, mock_info):
+    H, W = 3, 4
+    mock_info.return_value = {"width": W, "height": H, "n_frames": 1,
+                              "fps": 30.0, "bit_depth": 8, "color_range": "tv"}
+
+    frame = np.zeros(H * W, dtype=np.uint8).tobytes()
+    mock_proc = MagicMock()
+    mock_proc.stdout.read.side_effect = [frame, b""]
+    mock_popen.return_value = mock_proc
+
+    list(iter_luma_frames(Path("fake.mp4")))
+
+    cmd = mock_popen.call_args[0][0]
+    vf_arg = cmd[cmd.index("-vf") + 1]
+    assert vf_arg == "format=gray"
