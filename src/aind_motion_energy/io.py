@@ -37,6 +37,7 @@ def iter_luma_frames(
     roi is (x, y, w, h) in pixels. start_frame/end_frame use fast input-side
     seeking so the actual start may be at the nearest keyframe.
     """
+    print("[aind-motion-energy] using yuv420p Y-plane extraction")
     info = get_video_info(video_path)
 
     out_w = roi[2] if roi else info["width"]
