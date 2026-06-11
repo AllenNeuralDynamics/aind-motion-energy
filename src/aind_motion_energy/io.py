@@ -30,20 +30,22 @@ def iter_luma_frames(
     start_frame: Optional[int] = None,
     end_frame: Optional[int] = None,
 ) -> Generator[np.ndarray, None, None]:
-    """Yield uint8 grayscale frames from a video via an ffmpeg rawvideo pipe.
+    """Yield uint8 Y-plane frames from a video via an ffmpeg rawvideo pipe.
 
-    One subprocess for the full video — much faster than per-frame extraction.
-    roi is (x, y, w, h) in pixels. start_frame/end_frame are inclusive/exclusive
-    frame indices; seeking uses fast input-side -ss so may start on the nearest
-    keyframe rather than the exact frame.
+    Outputs yuv420p and slices the Y plane directly — no colorspace conversion
+    or level expansion, matching the approach used by aind-video-utils.
+    roi is (x, y, w, h) in pixels. start_frame/end_frame use fast input-side
+    seeking so the actual start may be at the nearest keyframe.
     """
     info = get_video_info(video_path)
+
+    out_w = roi[2] if roi else info["width"]
+    out_h = roi[3] if roi else info["height"]
 
     vf_filters = []
     if roi is not None:
         x, y, w, h = roi
         vf_filters.append(f"crop={w}:{h}:{x}:{y}")
-    vf_filters.append("format=gray")
 
     cmd = ["ffmpeg"]
 
@@ -56,17 +58,19 @@ def iter_luma_frames(
         n_start = start_frame or 0
         cmd += ["-t", f"{(end_frame - n_start) / info['fps']:.6f}"]
 
+    if vf_filters:
+        cmd += ["-vf", ",".join(vf_filters)]
+
     cmd += [
-        "-vf", ",".join(vf_filters),
         "-f", "rawvideo",
-        "-pix_fmt", "gray",
+        "-pix_fmt", "yuv420p",
         "-loglevel", "error",
         "pipe:1",
     ]
 
-    out_w = roi[2] if roi else info["width"]
-    out_h = roi[3] if roi else info["height"]
-    frame_bytes = out_w * out_h
+    # yuv420p layout: Y plane (w*h bytes) + U plane (w*h/4) + V plane (w*h/4)
+    y_bytes = out_w * out_h
+    frame_bytes = y_bytes * 3 // 2
 
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     try:
@@ -74,7 +78,7 @@ def iter_luma_frames(
             raw = proc.stdout.read(frame_bytes)
             if len(raw) < frame_bytes:
                 break
-            yield np.frombuffer(raw, dtype=np.uint8).reshape(out_h, out_w)
+            yield np.frombuffer(raw, dtype=np.uint8, count=y_bytes).reshape(out_h, out_w)
     finally:
         proc.stdout.close()
         proc.wait()
