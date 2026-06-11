@@ -107,3 +107,58 @@ def test_iter_luma_frames_no_roi_uses_format_only(mock_popen, mock_info):
     cmd = mock_popen.call_args[0][0]
     vf_arg = cmd[cmd.index("-vf") + 1]
     assert vf_arg == "format=gray"
+
+
+@patch("aind_motion_energy.io.get_video_info")
+@patch("aind_motion_energy.io.subprocess.Popen")
+def test_iter_luma_frames_start_frame_adds_ss_before_input(mock_popen, mock_info):
+    H, W = 3, 4
+    mock_info.return_value = {"width": W, "height": H, "n_frames": 100,
+                              "fps": 50.0, "bit_depth": 8, "color_range": "tv"}
+    mock_proc = MagicMock()
+    mock_proc.stdout.read.return_value = b""
+    mock_popen.return_value = mock_proc
+
+    list(iter_luma_frames(Path("fake.mp4"), start_frame=50))
+
+    cmd = mock_popen.call_args[0][0]
+    ss_idx = cmd.index("-ss")
+    i_idx = cmd.index("-i")
+    assert ss_idx < i_idx
+    assert float(cmd[ss_idx + 1]) == pytest.approx(1.0)  # 50 frames / 50 fps
+
+
+@patch("aind_motion_energy.io.get_video_info")
+@patch("aind_motion_energy.io.subprocess.Popen")
+def test_iter_luma_frames_end_frame_adds_t_after_input(mock_popen, mock_info):
+    H, W = 3, 4
+    mock_info.return_value = {"width": W, "height": H, "n_frames": 100,
+                              "fps": 50.0, "bit_depth": 8, "color_range": "tv"}
+    mock_proc = MagicMock()
+    mock_proc.stdout.read.return_value = b""
+    mock_popen.return_value = mock_proc
+
+    list(iter_luma_frames(Path("fake.mp4"), start_frame=50, end_frame=100))
+
+    cmd = mock_popen.call_args[0][0]
+    i_idx = cmd.index("-i")
+    t_idx = cmd.index("-t")
+    assert t_idx > i_idx
+    assert float(cmd[t_idx + 1]) == pytest.approx(1.0)  # (100-50) frames / 50 fps
+
+
+@patch("aind_motion_energy.io.get_video_info")
+@patch("aind_motion_energy.io.subprocess.Popen")
+def test_iter_luma_frames_no_window_has_no_ss_or_t(mock_popen, mock_info):
+    H, W = 3, 4
+    mock_info.return_value = {"width": W, "height": H, "n_frames": 10,
+                              "fps": 30.0, "bit_depth": 8, "color_range": "tv"}
+    mock_proc = MagicMock()
+    mock_proc.stdout.read.return_value = b""
+    mock_popen.return_value = mock_proc
+
+    list(iter_luma_frames(Path("fake.mp4")))
+
+    cmd = mock_popen.call_args[0][0]
+    assert "-ss" not in cmd
+    assert "-t" not in cmd

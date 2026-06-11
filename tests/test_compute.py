@@ -108,3 +108,16 @@ def test_roi_adjusts_pixel_count_and_map_shape(mock_info, mock_iter):
     assert meta["roi"] == list(roi)
     assert avg_map.shape == (roi_h, roi_w)
     assert me[0] == pytest.approx(20.0)
+
+
+@patch("aind_motion_energy.compute.iter_luma_frames")
+@patch("aind_motion_energy.compute.get_video_info")
+def test_frame_window_stored_in_metadata(mock_info, mock_iter):
+    H, W = 3, 4
+    mock_info.return_value = _info(width=W, height=H, n_frames=1000)
+    mock_iter.return_value = iter(_frames(3, H, W, fill=[0, 5, 10]))
+
+    _, _, meta = compute_motion_energy(Path("fake.mp4"), start_frame=100, end_frame=200)
+
+    assert meta["start_frame"] == 100
+    assert meta["end_frame"] == 200

@@ -27,11 +27,15 @@ def get_video_info(video_path: Path) -> dict:
 def iter_luma_frames(
     video_path: Path,
     roi: Optional[Tuple[int, int, int, int]] = None,
+    start_frame: Optional[int] = None,
+    end_frame: Optional[int] = None,
 ) -> Generator[np.ndarray, None, None]:
     """Yield uint8 grayscale frames from a video via an ffmpeg rawvideo pipe.
 
     One subprocess for the full video — much faster than per-frame extraction.
-    roi is (x, y, w, h) in pixels.
+    roi is (x, y, w, h) in pixels. start_frame/end_frame are inclusive/exclusive
+    frame indices; seeking uses fast input-side -ss so may start on the nearest
+    keyframe rather than the exact frame.
     """
     info = get_video_info(video_path)
 
@@ -41,9 +45,18 @@ def iter_luma_frames(
         vf_filters.append(f"crop={w}:{h}:{x}:{y}")
     vf_filters.append("format=gray")
 
-    cmd = [
-        "ffmpeg",
-        "-i", str(video_path),
+    cmd = ["ffmpeg"]
+
+    if start_frame is not None:
+        cmd += ["-ss", f"{start_frame / info['fps']:.6f}"]
+
+    cmd += ["-i", str(video_path)]
+
+    if end_frame is not None:
+        n_start = start_frame or 0
+        cmd += ["-t", f"{(end_frame - n_start) / info['fps']:.6f}"]
+
+    cmd += [
         "-vf", ",".join(vf_filters),
         "-f", "rawvideo",
         "-pix_fmt", "gray",

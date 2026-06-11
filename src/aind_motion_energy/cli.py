@@ -33,6 +33,14 @@ def main() -> None:
         "--format", choices=["npy", "csv", "both"], default="npy",
         help="Output format (default: npy)",
     )
+    parser.add_argument(
+        "--start-frame", type=int, default=None,
+        help="First frame to process (inclusive, 0-indexed)",
+    )
+    parser.add_argument(
+        "--end-frame", type=int, default=None,
+        help="Last frame to process (exclusive)",
+    )
     args = parser.parse_args()
 
     args.output.mkdir(parents=True, exist_ok=True)
@@ -51,7 +59,10 @@ def main() -> None:
         return
 
     for video in videos:
-        me, avg_map, meta = compute_motion_energy(video, roi=roi, normalize=not args.no_normalize)
+        me, avg_map, meta = compute_motion_energy(
+            video, roi=roi, normalize=not args.no_normalize,
+            start_frame=args.start_frame, end_frame=args.end_frame,
+        )
         stem = video.stem
 
         np.save(args.output / f"{stem}_motion_energy.npy", me)

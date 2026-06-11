@@ -11,6 +11,8 @@ def compute_motion_energy(
     video_path: Path,
     roi: Optional[Tuple[int, int, int, int]] = None,
     normalize: bool = True,
+    start_frame: Optional[int] = None,
+    end_frame: Optional[int] = None,
 ) -> Tuple[np.ndarray, np.ndarray, dict]:
     """Compute motion energy as the sum of absolute frame-to-frame differences.
 
@@ -32,9 +34,11 @@ def compute_motion_energy(
     prev_frame = None
     frames_read = 0
 
+    tqdm_total = (end_frame or info["n_frames"]) - (start_frame or 0)
+
     for frame in tqdm(
-        iter_luma_frames(video_path, roi=roi),
-        total=info["n_frames"],
+        iter_luma_frames(video_path, roi=roi, start_frame=start_frame, end_frame=end_frame),
+        total=tqdm_total,
         desc=video_path.stem,
         unit="frame",
     ):
@@ -66,6 +70,8 @@ def compute_motion_energy(
         "roi": list(roi) if roi else None,
         "normalized": normalize,
         "pixel_count": pixel_count,
+        "start_frame": start_frame,
+        "end_frame": end_frame,
     }
 
     return me, avg_map, metadata
