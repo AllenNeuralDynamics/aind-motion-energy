@@ -4,7 +4,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .compute import compute_motion_energy
+from .compute import clean_trace, compute_motion_energy
 
 VIDEO_EXTENSIONS = {".mp4", ".avi", ".mkv", ".mov", ".mj2", ".tif", ".tiff"}
 
@@ -43,7 +43,11 @@ def main() -> None:
     )
     parser.add_argument(
         "--no-mask-keyframes", action="store_true",
-        help="Disable NaN masking of H.264/HEVC keyframe transitions",
+        help="Disable detection of H.264/HEVC keyframe-contaminated diffs",
+    )
+    parser.add_argument(
+        "--clean-method", choices=["interpolate", "nan"], default="interpolate",
+        help="How the cleaned trace handles keyframe diffs (default: interpolate)",
     )
     args = parser.parse_args()
 
@@ -63,24 +67,28 @@ def main() -> None:
         return
 
     for video in videos:
-        me, avg_map, meta = compute_motion_energy(
+        me, keyframe_mask, avg_map, meta = compute_motion_energy(
             video, roi=roi, normalize=not args.no_normalize,
             start_frame=args.start_frame, end_frame=args.end_frame,
             mask_keyframes=not args.no_mask_keyframes,
         )
+        me_clean = clean_trace(me, keyframe_mask, method=args.clean_method)
         stem = video.stem
 
         np.save(args.output / f"{stem}_motion_energy.npy", me)
+        np.save(args.output / f"{stem}_motion_energy_clean.npy", me_clean)
+        np.save(args.output / f"{stem}_keyframe_mask.npy", keyframe_mask)
         np.save(args.output / f"{stem}_motion_energy_map.npy", avg_map)
 
         if args.format in ("csv", "both"):
             import csv
             with open(args.output / f"{stem}_motion_energy.csv", "w", newline="") as f:
                 writer = csv.writer(f)
-                writer.writerow(["frame_index", "motion_energy"])
-                writer.writerows(enumerate(me))
+                writer.writerow(["frame_index", "motion_energy", "motion_energy_clean", "is_keyframe"])
+                writer.writerows(zip(range(len(me)), me, me_clean, keyframe_mask))
 
         with open(args.output / f"{stem}_me_metadata.json", "w") as f:
             json.dump(meta, f, indent=2)
 
-        print(f"{stem}: {len(me)} frames | max={me.max():.4f} | mean={me.mean():.4f}")
+        print(f"{stem}: {len(me)} diffs | {meta['n_keyframes_masked']} keyframes | "
+              f"max={me.max():.4f} | mean={me.mean():.4f}")

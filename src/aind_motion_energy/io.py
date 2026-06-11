@@ -1,12 +1,13 @@
-import subprocess
 from pathlib import Path
-from typing import FrozenSet, Generator, Optional, Tuple
+from typing import Generator, Optional, Tuple
 
+import av
 import numpy as np
 from aind_video_utils import probe, get_nb_frames, get_frame_dimensions, get_video_range_info
 
-# Codecs where every frame is a keyframe — no masking needed
-_INTRA_ONLY_CODECS = {"mjpeg", "rawvideo", "png", "dpx", "tiff", "ffv1"}
+# Codecs where every frame is intra-coded — no inter-frame keyframe pop, so
+# no diffs should be masked even though every frame reports as a keyframe.
+_INTRA_ONLY_CODECS = {"mjpeg", "rawvideo", "png", "dpx", "tiff", "ffv1", "huffyuv"}
 
 
 def get_video_info(video_path: Path) -> dict:
@@ -29,93 +30,40 @@ def get_video_info(video_path: Path) -> dict:
     }
 
 
-def get_keyframe_indices(video_path: Path, fps: float) -> FrozenSet[int]:
-    """Return frame indices of I-frames using ffprobe.
-
-    Uses -skip_frame noref so only keyframe headers are read — fast even for
-    long videos. Returns an empty frozenset if ffprobe fails.
-    """
-    try:
-        result = subprocess.run(
-            [
-                "ffprobe", "-v", "error",
-                "-select_streams", "v:0",
-                "-skip_frame", "noref",
-                "-show_entries", "frame=best_effort_timestamp_time",
-                "-of", "csv=p=0",
-                str(video_path),
-            ],
-            capture_output=True, text=True, check=True,
-        )
-    except subprocess.CalledProcessError:
-        return frozenset()
-
-    indices = set()
-    for line in result.stdout.splitlines():
-        line = line.strip()
-        if line:
-            try:
-                indices.add(round(float(line) * fps))
-            except ValueError:
-                pass
-    return frozenset(indices)
-
-
 def iter_luma_frames(
     video_path: Path,
     roi: Optional[Tuple[int, int, int, int]] = None,
     start_frame: Optional[int] = None,
     end_frame: Optional[int] = None,
-) -> Generator[np.ndarray, None, None]:
-    """Yield uint8 Y-plane frames from a video via an ffmpeg rawvideo pipe.
+) -> Generator[Tuple[np.ndarray, bool], None, None]:
+    """Yield (luma_frame, is_keyframe) tuples by decoding with PyAV.
 
-    Outputs yuv420p and slices the Y plane directly — no colorspace conversion
-    or level expansion, matching the approach used by aind-video-utils.
-    roi is (x, y, w, h) in pixels. start_frame/end_frame use fast input-side
-    seeking so the actual start may be at the nearest keyframe.
+    Reads the raw Y plane directly (no colorspace conversion or level
+    expansion) so values match the stored luminance exactly. is_keyframe is
+    the decoder's own per-frame flag, so keyframe transitions are identified
+    in the same single decode pass — no separate ffprobe call or timestamp
+    rounding. roi is (x, y, w, h) in pixels. start_frame is inclusive,
+    end_frame exclusive; frames are decoded from the start and counted, so
+    seeking is exact.
     """
-    info = get_video_info(video_path)
+    start = start_frame or 0
 
-    out_w = roi[2] if roi else info["width"]
-    out_h = roi[3] if roi else info["height"]
-
-    vf_filters = []
-    if roi is not None:
-        x, y, w, h = roi
-        vf_filters.append(f"crop={w}:{h}:{x}:{y}")
-
-    cmd = ["ffmpeg"]
-
-    if start_frame is not None:
-        cmd += ["-ss", f"{start_frame / info['fps']:.6f}"]
-
-    cmd += ["-i", str(video_path)]
-
-    if end_frame is not None:
-        n_start = start_frame or 0
-        cmd += ["-t", f"{(end_frame - n_start) / info['fps']:.6f}"]
-
-    if vf_filters:
-        cmd += ["-vf", ",".join(vf_filters)]
-
-    cmd += [
-        "-f", "rawvideo",
-        "-pix_fmt", "yuv420p",
-        "-loglevel", "error",
-        "pipe:1",
-    ]
-
-    # yuv420p layout: Y plane (w*h bytes) + U plane (w*h/4) + V plane (w*h/4)
-    y_bytes = out_w * out_h
-    frame_bytes = y_bytes * 3 // 2
-
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    container = av.open(str(video_path))
     try:
-        while True:
-            raw = proc.stdout.read(frame_bytes)
-            if len(raw) < frame_bytes:
+        stream = container.streams.video[0]
+        idx = 0
+        for frame in container.decode(stream):
+            if end_frame is not None and idx >= end_frame:
                 break
-            yield np.frombuffer(raw, dtype=np.uint8, count=y_bytes).reshape(out_h, out_w)
+            if idx >= start:
+                plane = frame.planes[0]
+                # Respect stride (line_size may exceed width due to padding).
+                y = np.frombuffer(plane, np.uint8).reshape(plane.height, plane.line_size)
+                y = y[:, : frame.width]
+                if roi is not None:
+                    x, y0, w, h = roi
+                    y = y[y0 : y0 + h, x : x + w]
+                yield np.ascontiguousarray(y), bool(frame.key_frame)
+            idx += 1
     finally:
-        proc.stdout.close()
-        proc.wait()
+        container.close()
