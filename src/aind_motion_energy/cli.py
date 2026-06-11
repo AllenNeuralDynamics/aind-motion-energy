@@ -41,6 +41,10 @@ def main() -> None:
         "--end-frame", type=int, default=None,
         help="Last frame to process (exclusive)",
     )
+    parser.add_argument(
+        "--no-mask-keyframes", action="store_true",
+        help="Disable NaN masking of H.264/HEVC keyframe transitions",
+    )
     args = parser.parse_args()
 
     args.output.mkdir(parents=True, exist_ok=True)
@@ -62,6 +66,7 @@ def main() -> None:
         me, avg_map, meta = compute_motion_energy(
             video, roi=roi, normalize=not args.no_normalize,
             start_frame=args.start_frame, end_frame=args.end_frame,
+            mask_keyframes=not args.no_mask_keyframes,
         )
         stem = video.stem
 

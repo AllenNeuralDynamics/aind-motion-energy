@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-from aind_motion_energy.io import get_video_info, iter_luma_frames
+from aind_motion_energy.io import get_keyframe_indices, get_video_info, iter_luma_frames
 
 
 def _fake_probe(fps="500/1"):
@@ -187,3 +187,24 @@ def test_iter_luma_frames_no_window_has_no_ss_or_t(mock_popen, mock_info):
     cmd = mock_popen.call_args[0][0]
     assert "-ss" not in cmd
     assert "-t" not in cmd
+
+
+@patch("aind_motion_energy.io.subprocess.run")
+def test_get_keyframe_indices_parses_timestamps(mock_run):
+    mock_run.return_value = MagicMock(
+        stdout="0.000000\n0.500000\n1.000000\n",
+        returncode=0,
+    )
+    indices = get_keyframe_indices(Path("fake.mp4"), fps=500.0)
+
+    assert 0 in indices    # 0.0s * 500 = 0
+    assert 250 in indices  # 0.5s * 500 = 250
+    assert 500 in indices  # 1.0s * 500 = 500
+
+
+@patch("aind_motion_energy.io.subprocess.run")
+def test_get_keyframe_indices_returns_empty_on_error(mock_run):
+    import subprocess
+    mock_run.side_effect = subprocess.CalledProcessError(1, "ffprobe")
+    indices = get_keyframe_indices(Path("fake.mp4"), fps=30.0)
+    assert indices == frozenset()

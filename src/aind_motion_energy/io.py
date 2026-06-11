@@ -1,9 +1,12 @@
 import subprocess
 from pathlib import Path
-from typing import Generator, Optional, Tuple
+from typing import FrozenSet, Generator, Optional, Tuple
 
 import numpy as np
 from aind_video_utils import probe, get_nb_frames, get_frame_dimensions, get_video_range_info
+
+# Codecs where every frame is a keyframe — no masking needed
+_INTRA_ONLY_CODECS = {"mjpeg", "rawvideo", "png", "dpx", "tiff", "ffv1"}
 
 
 def get_video_info(video_path: Path) -> dict:
@@ -14,6 +17,7 @@ def get_video_info(video_path: Path) -> dict:
     fps_str = p["streams"][0].get("r_frame_rate", "30/1")
     num, den = fps_str.split("/")
     fps = float(num) / float(den)
+    codec_name = p["streams"][0].get("codec_name", "unknown")
     return {
         "width": width,
         "height": height,
@@ -21,7 +25,40 @@ def get_video_info(video_path: Path) -> dict:
         "fps": fps,
         "bit_depth": bit_depth,
         "color_range": color_range,
+        "codec_name": codec_name,
     }
+
+
+def get_keyframe_indices(video_path: Path, fps: float) -> FrozenSet[int]:
+    """Return frame indices of I-frames using ffprobe.
+
+    Uses -skip_frame noref so only keyframe headers are read — fast even for
+    long videos. Returns an empty frozenset if ffprobe fails.
+    """
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "error",
+                "-select_streams", "v:0",
+                "-skip_frame", "noref",
+                "-show_entries", "frame=best_effort_timestamp_time",
+                "-of", "csv=p=0",
+                str(video_path),
+            ],
+            capture_output=True, text=True, check=True,
+        )
+    except subprocess.CalledProcessError:
+        return frozenset()
+
+    indices = set()
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        if line:
+            try:
+                indices.add(round(float(line) * fps))
+            except ValueError:
+                pass
+    return frozenset(indices)
 
 
 def iter_luma_frames(
@@ -37,7 +74,6 @@ def iter_luma_frames(
     roi is (x, y, w, h) in pixels. start_frame/end_frame use fast input-side
     seeking so the actual start may be at the nearest keyframe.
     """
-    print("[aind-motion-energy] using yuv420p Y-plane extraction")
     info = get_video_info(video_path)
 
     out_w = roi[2] if roi else info["width"]

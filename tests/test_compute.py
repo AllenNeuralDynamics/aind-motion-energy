@@ -7,9 +7,10 @@ import pytest
 from aind_motion_energy.compute import compute_motion_energy
 
 
-def _info(width=4, height=3, n_frames=5, fps=30.0, bit_depth=8):
+def _info(width=4, height=3, n_frames=5, fps=30.0, bit_depth=8, codec_name="mjpeg"):
     return {"width": width, "height": height, "n_frames": n_frames,
-            "fps": fps, "bit_depth": bit_depth, "color_range": "tv"}
+            "fps": fps, "bit_depth": bit_depth, "color_range": "tv",
+            "codec_name": codec_name}
 
 
 def _frames(n, height=3, width=4, fill=None):
@@ -64,7 +65,6 @@ def test_output_shapes(mock_info, mock_iter):
 @patch("aind_motion_energy.compute.get_video_info")
 def test_avg_map_is_mean_of_per_pixel_diffs(mock_info, mock_iter):
     H, W = 2, 2
-    # 3 frames: 0 → 10 → 20, per-pixel diff is always 10
     mock_info.return_value = _info(width=W, height=H, n_frames=3)
     mock_iter.return_value = iter(_frames(3, H, W, fill=[0, 10, 20]))
 
@@ -95,7 +95,7 @@ def test_metadata_fields(mock_info, mock_iter):
 @patch("aind_motion_energy.compute.iter_luma_frames")
 @patch("aind_motion_energy.compute.get_video_info")
 def test_roi_adjusts_pixel_count_and_map_shape(mock_info, mock_iter):
-    roi = (2, 2, 4, 3)  # x, y, w, h → out 4×3
+    roi = (2, 2, 4, 3)
     roi_w, roi_h = roi[2], roi[3]
     mock_info.return_value = _info(width=10, height=10, n_frames=2)
     frames = [np.zeros((roi_h, roi_w), dtype=np.uint8),
@@ -121,3 +121,51 @@ def test_frame_window_stored_in_metadata(mock_info, mock_iter):
 
     assert meta["start_frame"] == 100
     assert meta["end_frame"] == 200
+
+
+@patch("aind_motion_energy.compute.get_keyframe_indices")
+@patch("aind_motion_energy.compute.iter_luma_frames")
+@patch("aind_motion_energy.compute.get_video_info")
+def test_keyframe_transition_is_nan(mock_info, mock_iter, mock_kf):
+    H, W = 2, 2
+    # 4 frames → 3 diffs; frame index 2 is a keyframe → diff[1] should be NaN
+    mock_info.return_value = _info(width=W, height=H, n_frames=4, codec_name="h264")
+    mock_iter.return_value = iter(_frames(4, H, W, fill=[0, 10, 20, 30]))
+    mock_kf.return_value = frozenset({2})
+
+    me, _, meta = compute_motion_energy(Path("fake.mp4"), normalize=False)
+
+    assert me.shape == (3,)
+    assert not np.isnan(me[0])  # frame 0→1: normal
+    assert np.isnan(me[1])      # frame 1→2: keyframe transition
+    assert not np.isnan(me[2])  # frame 2→3: normal
+    assert meta["n_keyframes_masked"] == 1
+
+
+@patch("aind_motion_energy.compute.get_keyframe_indices")
+@patch("aind_motion_energy.compute.iter_luma_frames")
+@patch("aind_motion_energy.compute.get_video_info")
+def test_keyframe_excluded_from_avg_map(mock_info, mock_iter, mock_kf):
+    H, W = 2, 2
+    # frame 0→1: diff=10 everywhere; frame 1→2 is keyframe (NaN); frame 2→3: diff=5
+    # avg_map should be mean of only frames 0→1 and 2→3 = (10+5)/2 = 7.5
+    mock_info.return_value = _info(width=W, height=H, n_frames=4, codec_name="h264")
+    mock_iter.return_value = iter(_frames(4, H, W, fill=[0, 10, 20, 25]))
+    mock_kf.return_value = frozenset({2})
+
+    _, avg_map, _ = compute_motion_energy(Path("fake.mp4"), normalize=False)
+
+    np.testing.assert_allclose(avg_map, np.full((H, W), 7.5, dtype=np.float32))
+
+
+@patch("aind_motion_energy.compute.get_keyframe_indices")
+@patch("aind_motion_energy.compute.iter_luma_frames")
+@patch("aind_motion_energy.compute.get_video_info")
+def test_intra_only_codec_skips_keyframe_detection(mock_info, mock_iter, mock_kf):
+    H, W = 2, 2
+    mock_info.return_value = _info(width=W, height=H, n_frames=3, codec_name="mjpeg")
+    mock_iter.return_value = iter(_frames(3, H, W, fill=[0, 10, 20]))
+
+    compute_motion_energy(Path("fake.mp4"))
+
+    mock_kf.assert_not_called()
