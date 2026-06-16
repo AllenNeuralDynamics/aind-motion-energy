@@ -49,6 +49,22 @@ def main() -> None:
         "--clean-method", choices=["interpolate", "nan"], default="interpolate",
         help="How the cleaned trace handles keyframe diffs (default: interpolate)",
     )
+    parser.add_argument(
+        "--visualize", action="store_true",
+        help="Also render an MP4 of the footage with a synced scrolling ME plot",
+    )
+    parser.add_argument(
+        "--viz-fps", type=float, default=60.0,
+        help="Playback fps of the visualization video (default: 60)",
+    )
+    parser.add_argument(
+        "--viz-window-seconds", type=float, default=3.0,
+        help="Width of the scrolling plot window in seconds (default: 3.0)",
+    )
+    parser.add_argument(
+        "--viz-stride", type=int, default=1,
+        help="Render every Nth frame in the visualization (default: 1 = lossless)",
+    )
     args = parser.parse_args()
 
     args.output.mkdir(parents=True, exist_ok=True)
@@ -92,3 +108,16 @@ def main() -> None:
 
         print(f"{stem}: {len(me)} diffs | {meta['n_keyframes_masked']} keyframes | "
               f"max={me.max():.4f} | mean={me.mean():.4f}")
+
+        if args.visualize:
+            from .viz import render_motion_energy_video
+
+            mp4_path = render_motion_energy_video(
+                video, me_clean, fps_source=meta["fps"],
+                output_path=args.output / f"{stem}_motion_energy.mp4",
+                raw_trace=me,
+                roi=roi, start_frame=args.start_frame, end_frame=args.end_frame,
+                window_seconds=args.viz_window_seconds, out_fps=args.viz_fps,
+                stride=args.viz_stride,
+            )
+            print(f"  rendered {mp4_path}")
