@@ -51,6 +51,8 @@ def iter_luma_frames(
     container = av.open(str(video_path))
     try:
         stream = container.streams.video[0]
+        stream.thread_type = "AUTO"
+        stream.thread_count = 0
         idx = 0
         for frame in container.decode(stream):
             if end_frame is not None and idx >= end_frame:
