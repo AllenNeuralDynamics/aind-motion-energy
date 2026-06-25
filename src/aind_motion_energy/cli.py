@@ -50,6 +50,10 @@ def main() -> None:
         help="How the cleaned trace handles keyframe diffs (default: interpolate)",
     )
     parser.add_argument(
+        "--summary-plots", action="store_true",
+        help="Also save two static PNG summaries per video (ME timeseries + avg motion map)",
+    )
+    parser.add_argument(
         "--visualize", action="store_true",
         help="Also render an MP4 of the footage with a synced scrolling ME plot",
     )
@@ -108,6 +112,14 @@ def main() -> None:
 
         print(f"{stem}: {len(me)} diffs | {meta['n_keyframes_masked']} keyframes | "
               f"max={me.max():.4f} | mean={me.mean():.4f}")
+
+        if args.summary_plots:
+            from .viz import save_summary_plots
+
+            trace_png, map_png = save_summary_plots(
+                args.output, stem, me, me_clean, avg_map, fps=meta["fps"],
+            )
+            print(f"  saved {trace_png.name}, {map_png.name}")
 
         if args.visualize:
             from .viz import render_motion_energy_video

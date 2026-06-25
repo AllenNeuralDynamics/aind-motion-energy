@@ -1,6 +1,6 @@
 from .compute import clean_trace, compute_motion_energy
 from .io import get_video_info, iter_luma_frames
-from .viz import render_motion_energy_video
+from .viz import render_motion_energy_video, save_summary_plots
 
 __all__ = [
     "compute_motion_energy",
@@ -8,4 +8,5 @@ __all__ = [
     "get_video_info",
     "iter_luma_frames",
     "render_motion_energy_video",
+    "save_summary_plots",
 ]

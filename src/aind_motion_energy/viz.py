@@ -12,6 +12,62 @@ _VIZ_IMPORT_HINT = (
 )
 
 
+def save_summary_plots(
+    output_dir: Path,
+    stem: str,
+    me: np.ndarray,
+    me_clean: np.ndarray,
+    avg_map: np.ndarray,
+    *,
+    fps: float,
+    dpi: int = 150,
+) -> Tuple[Path, Path]:
+    """Save two static PNG summaries for one video.
+
+    1. ``{stem}_motion_energy.png`` — the motion-energy timeseries: the raw trace
+       as a faint gray background line and the cleaned trace as a bold steelblue
+       line on top, over source time in seconds.
+    2. ``{stem}_motion_energy_map.png`` — a heatmap of the per-pixel average
+       absolute frame difference (the spatial map of where motion occurred).
+
+    Returns the two output paths. Requires matplotlib (the ``[viz]`` extra).
+    """
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError as exc:  # pragma: no cover - exercised via monkeypatch in tests
+        raise ImportError(_VIZ_IMPORT_HINT) from exc
+
+    output_dir = Path(output_dir)
+    t = np.arange(len(me)) / fps
+
+    trace_path = output_dir / f"{stem}_motion_energy.png"
+    fig, ax = plt.subplots(figsize=(12, 3))
+    ax.plot(t, me, lw=0.4, color="0.78", alpha=0.8)
+    ax.plot(t, me_clean, lw=0.6, color="steelblue")
+    ax.set_xlabel("Time (s)")
+    ax.set_ylabel("Motion energy")
+    ax.set_title(stem)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    fig.tight_layout()
+    fig.savefig(trace_path, dpi=dpi)
+    plt.close(fig)
+
+    map_path = output_dir / f"{stem}_motion_energy_map.png"
+    fig, ax = plt.subplots(figsize=(6, 5))
+    im = ax.imshow(avg_map, cmap="hot", aspect="auto")
+    plt.colorbar(im, ax=ax, label="Mean abs diff (per pixel)")
+    ax.set_title(f"{stem} — avg motion map")
+    fig.tight_layout()
+    fig.savefig(map_path, dpi=dpi)
+    plt.close(fig)
+
+    return trace_path, map_path
+
+
 def render_motion_energy_video(
     video_path: Path,
     trace: np.ndarray,
