@@ -93,7 +93,12 @@ def main() -> None:
             mask_keyframes=not args.no_mask_keyframes,
         )
         me_clean = clean_trace(me, keyframe_mask, method=args.clean_method)
-        stem = video.stem
+        # Key outputs on the camera identity, not the bare file stem.
+        # New AIND layout nests each camera as <CameraName>/video.mp4, so every
+        # camera shares the stem "video" and would overwrite the others; use the
+        # parent folder name instead. Old flat layout (e.g. bottom_camera.avi)
+        # already carries the camera in the stem.
+        stem = video.parent.name if video.stem == "video" else video.stem
 
         np.save(args.output / f"{stem}_motion_energy.npy", me)
         np.save(args.output / f"{stem}_motion_energy_clean.npy", me_clean)
