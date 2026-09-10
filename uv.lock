@@ -21,6 +21,7 @@ viz = [
 [package.dev-dependencies]
 dev = [
     { name = "ipykernel" },
+    { name = "matplotlib" },
     { name = "nbclient" },
     { name = "nbformat" },
     { name = "opencv-python-headless" },
@@ -42,6 +43,7 @@ provides-extras = ["viz"]
 [package.metadata.requires-dev]
 dev = [
     { name = "ipykernel", specifier = ">=7.3.0" },
+    { name = "matplotlib", specifier = ">=3.7" },
     { name = "nbclient", specifier = ">=0.11.0" },
     { name = "nbformat", specifier = ">=5.10.4" },
     { name = "opencv-python-headless", specifier = ">=4.13.0.92" },

@@ -40,6 +40,7 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
     "ipykernel>=7.3.0",
+    "matplotlib>=3.7",
     "nbclient>=0.11.0",
     "nbformat>=5.10.4",
     "opencv-python-headless>=4.13.0.92",
@@ -59,3 +60,6 @@ pylint.max-statements = 50
 
 [tool.ruff.format]
 quote-style = "double"
+
+[tool.pytest.ini_options]
+addopts = "--cov=aind_motion_energy --cov-fail-under=68"
