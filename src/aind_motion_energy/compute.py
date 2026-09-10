@@ -1,5 +1,7 @@
+"""Motion-energy computation and post-processing of raw traces."""
+
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Any
 
 import numpy as np
 from tqdm import tqdm
@@ -9,27 +11,48 @@ from .io import _INTRA_ONLY_CODECS, get_video_info, iter_luma_frames
 
 def compute_motion_energy(
     video_path: Path,
-    roi: Optional[Tuple[int, int, int, int]] = None,
+    roi: tuple[int, int, int, int] | None = None,
     normalize: bool = True,
-    start_frame: Optional[int] = None,
-    end_frame: Optional[int] = None,
+    start_frame: int | None = None,
+    end_frame: int | None = None,
     mask_keyframes: bool = True,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, dict]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, Any]]:
     """Compute motion energy as the sum of absolute frame-to-frame differences.
 
     Standard for animal behavior analysis (e.g. Musall et al. 2019). The raw
     motion energy is never altered — diffs contaminated by an H.264/HEVC
-    keyframe "pop" are returned as-is and flagged in keyframe_mask instead, so
-    nothing is discarded. Use clean_trace() to produce a NaN'd or interpolated
-    version for plotting/regression.
+    keyframe "pop" are returned as-is and flagged in `keyframe_mask` instead,
+    so nothing is discarded. Use `clean_trace` to produce a NaN'd or
+    interpolated version for plotting/regression.
 
-    Returns (motion_energy, keyframe_mask, avg_map, metadata):
-      - motion_energy: float32 array of shape (n_frames - 1,), raw values
-      - keyframe_mask: bool array of shape (n_frames - 1,), True where the diff
-        crosses into a keyframe (contaminated by compression pop)
-      - avg_map: float32 array of shape (H, W), mean abs difference per pixel,
-        computed excluding keyframe-contaminated diffs
-      - metadata: dict with video properties and processing parameters
+    Parameters
+    ----------
+    video_path : Path
+        Path to the video file.
+    roi : tuple[int, int, int, int] or None, optional
+        Region of interest as ``(x, y, w, h)`` in pixels. If None, the full
+        frame is used.
+    normalize : bool, optional
+        Divide motion energy by the pixel count, by default True.
+    start_frame : int or None, optional
+        First frame to process, inclusive.
+    end_frame : int or None, optional
+        Last frame to process, exclusive.
+    mask_keyframes : bool, optional
+        Detect and flag diffs contaminated by a keyframe pop, by default True.
+
+    Returns
+    -------
+    motion_energy : numpy.ndarray
+        Float32 array of shape ``(n_frames - 1,)``, raw values.
+    keyframe_mask : numpy.ndarray
+        Bool array of shape ``(n_frames - 1,)``, True where the diff crosses
+        into a keyframe (contaminated by compression pop).
+    avg_map : numpy.ndarray
+        Float32 array of shape ``(H, W)``, mean abs difference per pixel,
+        computed excluding keyframe-contaminated diffs.
+    metadata : dict[str, Any]
+        Video properties and processing parameters.
     """
     video_path = Path(video_path)
     info = get_video_info(video_path)
@@ -108,11 +131,29 @@ def clean_trace(
     keyframe_mask: np.ndarray,
     method: str = "interpolate",
 ) -> np.ndarray:
-    """Return a copy of motion_energy with keyframe-contaminated diffs handled.
+    """Return a copy of `motion_energy` with keyframe-contaminated diffs handled.
 
-    method="interpolate" linearly interpolates across flagged points (continuous
-    trace, good for regression); method="nan" replaces them with NaN (gaps).
-    The input is never modified.
+    Parameters
+    ----------
+    motion_energy : numpy.ndarray
+        Raw motion-energy trace.
+    keyframe_mask : numpy.ndarray
+        Bool array flagging keyframe-contaminated entries in `motion_energy`.
+    method : str, optional
+        ``"interpolate"`` linearly interpolates across flagged points
+        (continuous trace, good for regression); ``"nan"`` replaces them with
+        NaN (gaps). By default ``"interpolate"``.
+
+    Returns
+    -------
+    numpy.ndarray
+        Copy of `motion_energy` with flagged entries handled per `method`.
+        The input is never modified.
+
+    Raises
+    ------
+    ValueError
+        If `method` is not ``"interpolate"`` or ``"nan"``.
     """
     out = motion_energy.astype(np.float32).copy()
     if not keyframe_mask.any():

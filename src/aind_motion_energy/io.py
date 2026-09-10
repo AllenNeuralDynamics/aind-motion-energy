@@ -1,5 +1,8 @@
+"""Video probing and frame decoding with PyAV."""
+
+from collections.abc import Generator
 from pathlib import Path
-from typing import Generator, Optional, Tuple
+from typing import Any
 
 import av
 import numpy as np
@@ -10,7 +13,20 @@ from aind_video_utils import get_frame_dimensions, get_nb_frames, get_video_rang
 _INTRA_ONLY_CODECS = {"mjpeg", "rawvideo", "png", "dpx", "tiff", "ffv1", "huffyuv"}
 
 
-def get_video_info(video_path: Path) -> dict:
+def get_video_info(video_path: Path) -> dict[str, Any]:
+    """Probe a video file for the properties motion-energy computation needs.
+
+    Parameters
+    ----------
+    video_path : Path
+        Path to the video file.
+
+    Returns
+    -------
+    dict[str, Any]
+        Dictionary with keys ``width``, ``height``, ``n_frames``, ``fps``,
+        ``bit_depth``, ``color_range``, and ``codec_name``.
+    """
     p = probe(video_path)
     width, height = get_frame_dimensions(p)
     n_frames = get_nb_frames(p)
@@ -32,19 +48,37 @@ def get_video_info(video_path: Path) -> dict:
 
 def iter_luma_frames(
     video_path: Path,
-    roi: Optional[Tuple[int, int, int, int]] = None,
-    start_frame: Optional[int] = None,
-    end_frame: Optional[int] = None,
-) -> Generator[Tuple[np.ndarray, bool], None, None]:
-    """Yield (luma_frame, is_keyframe) tuples by decoding with PyAV.
+    roi: tuple[int, int, int, int] | None = None,
+    start_frame: int | None = None,
+    end_frame: int | None = None,
+) -> Generator[tuple[np.ndarray, bool], None, None]:
+    """Yield ``(luma_frame, is_keyframe)`` pairs by decoding a video with PyAV.
 
     Reads the raw Y plane directly (no colorspace conversion or level
-    expansion) so values match the stored luminance exactly. is_keyframe is
-    the decoder's own per-frame flag, so keyframe transitions are identified
-    in the same single decode pass — no separate ffprobe call or timestamp
-    rounding. roi is (x, y, w, h) in pixels. start_frame is inclusive,
-    end_frame exclusive; frames are decoded from the start and counted, so
-    seeking is exact.
+    expansion) so values match the stored luminance exactly. ``is_keyframe``
+    is the decoder's own per-frame flag, so keyframe transitions are
+    identified in the same single decode pass — no separate ffprobe call or
+    timestamp rounding.
+
+    Parameters
+    ----------
+    video_path : Path
+        Path to the video file.
+    roi : tuple[int, int, int, int] or None, optional
+        Region of interest as ``(x, y, w, h)`` in pixels. If None, the full
+        frame is yielded.
+    start_frame : int or None, optional
+        First frame to yield, inclusive. Frames are decoded from the start
+        and counted, so seeking is exact.
+    end_frame : int or None, optional
+        Last frame to yield, exclusive.
+
+    Yields
+    ------
+    luma_frame : numpy.ndarray
+        The Y (luma) plane of the frame, cropped to `roi` if given.
+    is_keyframe : bool
+        Whether the decoder flagged this frame as a keyframe.
     """
     start = start_frame or 0
 

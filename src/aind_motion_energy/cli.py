@@ -1,3 +1,5 @@
+"""Command-line interface for computing motion energy from behavior videos."""
+
 import argparse
 import json
 from pathlib import Path
@@ -10,6 +12,15 @@ VIDEO_EXTENSIONS = {".mp4", ".avi", ".mkv", ".mov", ".mj2", ".tif", ".tiff"}
 
 
 def main() -> None:
+    """Parse CLI arguments and compute motion energy for each discovered video.
+
+    Discovers videos under ``--input`` (a single file, or a directory searched
+    recursively for known video extensions), computes motion energy for each,
+    and writes the raw trace, cleaned trace, keyframe mask, average motion
+    map, and metadata to ``--output``. Optionally also writes CSV output,
+    static summary plots, and a rendered visualization video, depending on
+    the flags passed.
+    """
     parser = argparse.ArgumentParser(description="Compute motion energy from behavior videos")
     parser.add_argument(
         "--input",

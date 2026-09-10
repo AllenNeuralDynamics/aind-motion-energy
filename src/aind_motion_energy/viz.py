@@ -1,5 +1,7 @@
+"""Static summary plots and scrolling motion-energy video rendering."""
+
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Any
 
 import av
 import numpy as np
@@ -12,7 +14,7 @@ _VIZ_IMPORT_HINT = (
 )
 
 
-def _import_pyplot():
+def _import_pyplot() -> Any:
     try:
         import matplotlib
 
@@ -32,7 +34,7 @@ def save_summary_plots(
     *,
     fps: float,
     dpi: int = 150,
-) -> Tuple[Path, Path]:
+) -> tuple[Path, Path]:
     """Save two static PNG summaries for one video.
 
     1. ``{stem}_motion_energy.png`` — the motion-energy timeseries: the raw trace
@@ -41,7 +43,29 @@ def save_summary_plots(
     2. ``{stem}_motion_energy_map.png`` — a heatmap of the per-pixel average
        absolute frame difference (the spatial map of where motion occurred).
 
-    Returns the two output paths. Requires matplotlib (the ``[viz]`` extra).
+    Requires matplotlib (the ``[viz]`` extra).
+
+    Parameters
+    ----------
+    output_dir : Path
+        Directory to save the PNGs into.
+    stem : str
+        Filename stem shared by both PNGs and used as the plot title.
+    me : numpy.ndarray
+        Raw motion-energy trace.
+    me_clean : numpy.ndarray
+        Cleaned motion-energy trace (see `clean_trace`).
+    avg_map : numpy.ndarray
+        Per-pixel average absolute frame difference, shape ``(H, W)``.
+    fps : float
+        Source video frame rate, used to convert sample index to seconds.
+    dpi : int, optional
+        Resolution of the saved PNGs, by default 150.
+
+    Returns
+    -------
+    tuple[Path, Path]
+        Paths to the timeseries PNG and the heatmap PNG.
     """
     plt = _import_pyplot()
 
@@ -73,8 +97,35 @@ def save_summary_plots(
     return trace_path, map_path
 
 
-def _build_trace_figure(plt, dpi, trace_t, trace, raw):
-    """Build the image+trace figure used as the render_motion_energy_video canvas."""
+def _build_trace_figure(
+    plt: Any, dpi: int, trace_t: np.ndarray, trace: np.ndarray, raw: np.ndarray | None
+) -> tuple[Any, Any, Any, Any]:
+    """Build the image+trace figure used as the render_motion_energy_video canvas.
+
+    Parameters
+    ----------
+    plt : module
+        The imported ``matplotlib.pyplot`` module.
+    dpi : int
+        Figure resolution.
+    trace_t : numpy.ndarray
+        Time values (seconds) for each point in `trace`.
+    trace : numpy.ndarray
+        Cleaned motion-energy trace to plot.
+    raw : numpy.ndarray or None
+        Raw motion-energy trace to plot as a faint background line, if given.
+
+    Returns
+    -------
+    fig : matplotlib.figure.Figure
+        The created figure.
+    ax_img : matplotlib.axes.Axes
+        Axes for the video frame image.
+    ax_plot : matplotlib.axes.Axes
+        Axes for the scrolling trace plot.
+    cursor : matplotlib.lines.Line2D
+        Vertical line marking the current playback time.
+    """
     fig, (ax_img, ax_plot) = plt.subplots(
         2, 1, figsize=(8, 7), dpi=dpi, gridspec_kw={"height_ratios": [3, 1]}
     )
@@ -96,8 +147,19 @@ def _build_trace_figure(plt, dpi, trace_t, trace, raw):
     return fig, ax_img, ax_plot, cursor
 
 
-def _capture_rgb_frame(fig):
-    """Rasterize the current figure canvas to an even-dimensioned RGB array."""
+def _capture_rgb_frame(fig: Any) -> np.ndarray:
+    """Rasterize the current figure canvas to an even-dimensioned RGB array.
+
+    Parameters
+    ----------
+    fig : matplotlib.figure.Figure
+        Figure to rasterize.
+
+    Returns
+    -------
+    numpy.ndarray
+        RGB array with even height and width (required by the H.264 encoder).
+    """
     fig.canvas.draw()
     buf = np.asarray(fig.canvas.buffer_rgba())
     rgb = np.ascontiguousarray(buf[..., :3])
@@ -106,7 +168,9 @@ def _capture_rgb_frame(fig):
     return rgb[:h, :w]
 
 
-def _open_video_writer(output_path, out_fps, width, height):
+def _open_video_writer(
+    output_path: Path, out_fps: float, width: int, height: int
+) -> tuple[Any, Any]:
     container = av.open(str(output_path), mode="w")
     stream = container.add_stream("libx264", rate=int(round(out_fps)))
     stream.width = width
@@ -115,7 +179,7 @@ def _open_video_writer(output_path, out_fps, width, height):
     return container, stream
 
 
-def _finalize_video_writer(container, stream):
+def _finalize_video_writer(container: Any, stream: Any) -> None:
     for packet in stream.encode():
         container.mux(packet)
     container.close()
@@ -127,10 +191,10 @@ def render_motion_energy_video(
     *,
     fps_source: float,
     output_path: Path,
-    raw_trace: Optional[np.ndarray] = None,
-    roi: Optional[Tuple[int, int, int, int]] = None,
-    start_frame: Optional[int] = None,
-    end_frame: Optional[int] = None,
+    raw_trace: np.ndarray | None = None,
+    roi: tuple[int, int, int, int] | None = None,
+    start_frame: int | None = None,
+    end_frame: int | None = None,
     window_seconds: float = 3.0,
     out_fps: float = 60.0,
     stride: int = 1,
@@ -142,16 +206,51 @@ def render_motion_energy_video(
     below it with a thin cursor. The displayed pixels are the exact Y-plane array
     motion energy was computed on (identical to native for monochrome cameras).
 
-    trace is the cleaned (interpolated) ME trace; raw_trace, if provided, is the
-    unmodified ME including keyframe artifact spikes. When raw_trace is given, both
-    are drawn: raw as a faint gray background line and clean as a bold steelblue
-    line on top. This lets a viewer see the encoding spikes at their true amplitude
-    and position, confirming the clean trace tracks genuine motion.
+    `trace` has one fewer entry than the number of frames. The x-axis is source
+    time in seconds, independent of `out_fps`. `out_fps` only sets playback
+    speed of the output file (no frames are dropped).
 
-    trace has one fewer entry than the number of frames. The x-axis is source time
-    in seconds, independent of out_fps. out_fps only sets playback speed of the
-    output file (no frames are dropped). stride renders every Nth frame (default 1
-    = lossless); values > 1 trade temporal resolution for render time / file size.
+    Parameters
+    ----------
+    video_path : Path
+        Path to the source video.
+    trace : numpy.ndarray
+        Cleaned (interpolated) motion-energy trace to plot.
+    fps_source : float
+        Frame rate of the source video, used to convert frame index to time.
+    output_path : Path
+        Path to write the rendered MP4 to.
+    raw_trace : numpy.ndarray or None, optional
+        Unmodified motion-energy trace including keyframe artifact spikes.
+        When given, both traces are drawn: raw as a faint gray background
+        line and clean as a bold steelblue line on top. This lets a viewer
+        see the encoding spikes at their true amplitude and position,
+        confirming the clean trace tracks genuine motion.
+    roi : tuple[int, int, int, int] or None, optional
+        Region of interest as ``(x, y, w, h)`` in pixels.
+    start_frame : int or None, optional
+        First frame to render, inclusive.
+    end_frame : int or None, optional
+        Last frame to render, exclusive.
+    window_seconds : float, optional
+        Width of the scrolling plot window in seconds, by default 3.0.
+    out_fps : float, optional
+        Playback frame rate of the output file, by default 60.0.
+    stride : int, optional
+        Render every Nth frame; values > 1 trade temporal resolution for
+        render time / file size, by default 1 (lossless).
+    dpi : int, optional
+        Figure resolution, by default 100.
+
+    Returns
+    -------
+    Path
+        Path to the rendered MP4 (same as `output_path`).
+
+    Raises
+    ------
+    ValueError
+        If `stride` is less than 1.
     """
     plt = _import_pyplot()
 
