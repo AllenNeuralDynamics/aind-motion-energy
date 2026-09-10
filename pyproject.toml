@@ -44,8 +44,6 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "I", "W", "C901", "PLR0915"]
 mccabe.max-complexity = 10
-# Ruff has no native "max lines per function" rule; too-many-statements is
-# the closest available proxy for the ~100-line function-length target.
 pylint.max-statements = 50
 
 [tool.ruff.format]
