@@ -15,10 +15,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = [
-    "pytest>=8.0",
-    "pytest-cov>=5.0",
-]
 viz = [
     "matplotlib>=3.7",
 ]
@@ -38,4 +34,19 @@ dev = [
     "opencv-python-headless>=4.13.0.92",
     "pytest>=9.0.3",
     "pytest-cov>=7.1.0",
+    "ruff>=0.8.0",
 ]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "C901", "PLR0915"]
+mccabe.max-complexity = 10
+# Ruff has no native "max lines per function" rule; too-many-statements is
+# the closest available proxy for the ~100-line function-length target.
+pylint.max-statements = 50
+
+[tool.ruff.format]
+quote-style = "double"

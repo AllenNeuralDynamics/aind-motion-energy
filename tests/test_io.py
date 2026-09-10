@@ -13,6 +13,7 @@ def _fake_probe(fps="500/1", codec="h264"):
 
 # --- get_video_info -------------------------------------------------------
 
+
 @patch("aind_motion_energy.io.get_video_range_info")
 @patch("aind_motion_energy.io.get_nb_frames")
 @patch("aind_motion_energy.io.get_frame_dimensions")
@@ -49,6 +50,7 @@ def test_get_video_info_fractional_fps(mock_probe, mock_dims, mock_nb, mock_rang
 
 
 # --- iter_luma_frames (PyAV mocked) ---------------------------------------
+
 
 class _FakePlane(np.ndarray):
     """1-D uint8 ndarray (buffer-protocol capable) with height/line_size attrs."""
@@ -103,7 +105,7 @@ def test_iter_luma_frames_respects_line_size_padding(mock_open):
     # decoder pads each row to line_size=8; we must read only the first W columns
     mock_open.return_value = _fake_container([_make_frame(a, False, line_size=8)])
 
-    (frame, _), = list(iter_luma_frames(Path("fake.mp4")))
+    ((frame, _),) = list(iter_luma_frames(Path("fake.mp4")))
 
     assert frame.shape == (H, W)
     np.testing.assert_array_equal(frame, a)
@@ -115,7 +117,7 @@ def test_iter_luma_frames_roi_crops(mock_open):
     roi = (2, 3, 4, 5)  # x, y, w, h
     mock_open.return_value = _fake_container([_make_frame(full, False)])
 
-    (frame, _), = list(iter_luma_frames(Path("fake.mp4"), roi=roi))
+    ((frame, _),) = list(iter_luma_frames(Path("fake.mp4"), roi=roi))
 
     assert frame.shape == (5, 4)  # (h, w)
     np.testing.assert_array_equal(frame, full[3:8, 2:6])

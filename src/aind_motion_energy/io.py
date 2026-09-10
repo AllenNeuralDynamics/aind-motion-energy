@@ -3,7 +3,7 @@ from typing import Generator, Optional, Tuple
 
 import av
 import numpy as np
-from aind_video_utils import probe, get_nb_frames, get_frame_dimensions, get_video_range_info
+from aind_video_utils import get_frame_dimensions, get_nb_frames, get_video_range_info, probe
 
 # Codecs where every frame is intra-coded — no inter-frame keyframe pop, so
 # no diffs should be masked even though every frame reports as a keyframe.
