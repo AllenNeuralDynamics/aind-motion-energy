@@ -32,3 +32,17 @@ a release.
 - CI (lint, type check, tests) must pass before merge.
 - Squash-merge only — keep the individual commit history on the feature
   branch as messy as you like; the PR title is what matters.
+
+## Documentation
+
+The docs site is MkDocs + [mkdocstrings](https://mkdocstrings.github.io/); the
+API reference is generated from the numpydoc docstrings in `src/`, so new public
+functions appear on the site without touching `docs/`.
+
+```bash
+uv run mkdocs serve          # live preview at http://127.0.0.1:8000
+uv run mkdocs build --strict # what Read the Docs runs
+```
+
+`--strict` fails on broken internal links and docstring-parsing warnings; run it
+before opening a PR that touches docstrings or `docs/`.

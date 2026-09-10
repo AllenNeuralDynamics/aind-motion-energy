@@ -12,5 +12,8 @@ dist/
 .coverage
 htmlcov/
 
+# MkDocs
+site/
+
 # macOS
 .DS_Store
