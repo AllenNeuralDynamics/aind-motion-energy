@@ -62,4 +62,8 @@ pylint.max-statements = 50
 quote-style = "double"
 
 [tool.pytest.ini_options]
-addopts = "--cov=aind_motion_energy --cov-fail-under=68"
+addopts = "--cov=aind_motion_energy --cov-fail-under=100"
+
+[tool.coverage.report]
+fail_under = 100
+omit = ["*__init__*"]
