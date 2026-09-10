@@ -12,6 +12,17 @@ _VIZ_IMPORT_HINT = (
 )
 
 
+def _import_pyplot():
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError as exc:  # pragma: no cover - exercised via monkeypatch in tests
+        raise ImportError(_VIZ_IMPORT_HINT) from exc
+    return plt
+
+
 def save_summary_plots(
     output_dir: Path,
     stem: str,
@@ -32,13 +43,7 @@ def save_summary_plots(
 
     Returns the two output paths. Requires matplotlib (the ``[viz]`` extra).
     """
-    try:
-        import matplotlib
-
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-    except ImportError as exc:  # pragma: no cover - exercised via monkeypatch in tests
-        raise ImportError(_VIZ_IMPORT_HINT) from exc
+    plt = _import_pyplot()
 
     output_dir = Path(output_dir)
     t = np.arange(len(me)) / fps
@@ -66,6 +71,54 @@ def save_summary_plots(
     plt.close(fig)
 
     return trace_path, map_path
+
+
+def _build_trace_figure(plt, dpi, trace_t, trace, raw):
+    """Build the image+trace figure used as the render_motion_energy_video canvas."""
+    fig, (ax_img, ax_plot) = plt.subplots(
+        2, 1, figsize=(8, 7), dpi=dpi, gridspec_kw={"height_ratios": [3, 1]}
+    )
+    ax_img.axis("off")
+    if raw is not None:
+        ax_plot.plot(trace_t, raw, lw=0.5, color="0.78", alpha=0.8, zorder=1)
+    ax_plot.plot(trace_t, trace, lw=0.7, color="steelblue", zorder=2)
+    cursor = ax_plot.axvline(float(trace_t[0]) if len(trace_t) else 0.0, lw=0.8, color="0.5")
+    ax_plot.set_xlabel("Time (s)")
+    ax_plot.set_ylabel("Motion energy")
+    ax_plot.spines["top"].set_visible(False)
+    ax_plot.spines["right"].set_visible(False)
+    if len(trace):
+        upper = float(raw.max()) if raw is not None else float(trace.max())
+        lower = float(raw.min()) if raw is not None else float(trace.min())
+        pad = 0.05 * ((upper - lower) or 1.0)
+        ax_plot.set_ylim(lower - pad, upper + pad)
+    fig.tight_layout()
+    return fig, ax_img, ax_plot, cursor
+
+
+def _capture_rgb_frame(fig):
+    """Rasterize the current figure canvas to an even-dimensioned RGB array."""
+    fig.canvas.draw()
+    buf = np.asarray(fig.canvas.buffer_rgba())
+    rgb = np.ascontiguousarray(buf[..., :3])
+    h = rgb.shape[0] - (rgb.shape[0] % 2)
+    w = rgb.shape[1] - (rgb.shape[1] % 2)
+    return rgb[:h, :w]
+
+
+def _open_video_writer(output_path, out_fps, width, height):
+    container = av.open(str(output_path), mode="w")
+    stream = container.add_stream("libx264", rate=int(round(out_fps)))
+    stream.width = width
+    stream.height = height
+    stream.pix_fmt = "yuv420p"
+    return container, stream
+
+
+def _finalize_video_writer(container, stream):
+    for packet in stream.encode():
+        container.mux(packet)
+    container.close()
 
 
 def render_motion_energy_video(
@@ -100,13 +153,7 @@ def render_motion_energy_video(
     output file (no frames are dropped). stride renders every Nth frame (default 1
     = lossless); values > 1 trade temporal resolution for render time / file size.
     """
-    try:
-        import matplotlib
-
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-    except ImportError as exc:  # pragma: no cover - exercised via monkeypatch in tests
-        raise ImportError(_VIZ_IMPORT_HINT) from exc
+    plt = _import_pyplot()
 
     output_path = Path(output_path)
     trace = np.asarray(trace, dtype=np.float32)
@@ -117,34 +164,14 @@ def render_motion_energy_video(
 
     # trace[m] is the diff ending at frame (start + m + 1); place it at that time.
     trace_t = (start + np.arange(len(trace)) + 1) / fps_source
-
-    fig, (ax_img, ax_plot) = plt.subplots(
-        2, 1, figsize=(8, 7), dpi=dpi, gridspec_kw={"height_ratios": [3, 1]}
-    )
-    ax_img.axis("off")
-    if raw is not None:
-        ax_plot.plot(trace_t, raw, lw=0.5, color="0.78", alpha=0.8, zorder=1)
-    ax_plot.plot(trace_t, trace, lw=0.7, color="steelblue", zorder=2)
-    cursor = ax_plot.axvline(float(trace_t[0]) if len(trace_t) else 0.0, lw=0.8, color="0.5")
-    ax_plot.set_xlabel("Time (s)")
-    ax_plot.set_ylabel("Motion energy")
-    ax_plot.spines["top"].set_visible(False)
-    ax_plot.spines["right"].set_visible(False)
-    if len(trace):
-        upper = float(raw.max()) if raw is not None else float(trace.max())
-        lower = float(raw.min()) if raw is not None else float(trace.min())
-        pad = 0.05 * ((upper - lower) or 1.0)
-        ax_plot.set_ylim(lower - pad, upper + pad)
-    fig.tight_layout()
+    fig, ax_img, ax_plot, cursor = _build_trace_figure(plt, dpi, trace_t, trace, raw)
 
     img_artist = None
     container = None
     stream = None
     try:
         for j, (frame, _is_key) in enumerate(
-            iter_luma_frames(
-                video_path, roi=roi, start_frame=start_frame, end_frame=end_frame
-            )
+            iter_luma_frames(video_path, roi=roi, start_frame=start_frame, end_frame=end_frame)
         ):
             if j % stride != 0:
                 continue
@@ -157,28 +184,18 @@ def render_motion_energy_video(
             ax_plot.set_xlim(t_now - window_seconds, t_now)
             cursor.set_xdata([t_now, t_now])
 
-            fig.canvas.draw()
-            buf = np.asarray(fig.canvas.buffer_rgba())
-            rgb = np.ascontiguousarray(buf[..., :3])
-            h = rgb.shape[0] - (rgb.shape[0] % 2)
-            w = rgb.shape[1] - (rgb.shape[1] % 2)
-            rgb = rgb[:h, :w]
-
+            rgb = _capture_rgb_frame(fig)
             if container is None:
-                container = av.open(str(output_path), mode="w")
-                stream = container.add_stream("libx264", rate=int(round(out_fps)))
-                stream.width = w
-                stream.height = h
-                stream.pix_fmt = "yuv420p"
+                container, stream = _open_video_writer(
+                    output_path, out_fps, rgb.shape[1], rgb.shape[0]
+                )
 
             vframe = av.VideoFrame.from_ndarray(rgb, format="rgb24")
             for packet in stream.encode(vframe):
                 container.mux(packet)
 
         if container is not None:
-            for packet in stream.encode():
-                container.mux(packet)
-            container.close()
+            _finalize_video_writer(container, stream)
     finally:
         plt.close(fig)
 
