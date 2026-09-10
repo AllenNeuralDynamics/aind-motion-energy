@@ -3,12 +3,23 @@ name = "aind-motion-energy"
 version = "0.1.0"
 description = "Motion energy computation from behavior videos for neuroscience pipelines"
 readme = "README.md"
+license = { text = "MIT" }
 authors = [
-    { name = "1mattbecker", email = "105821807+1mattbecker@users.noreply.github.com" }
+    { name = "Allen Institute for Neural Dynamics", email = "webmaster@alleninstitute.org" }
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering",
 ]
 requires-python = ">=3.11"
 dependencies = [
-    "aind-video-utils>=0.1.0",
+    "aind-video-utils>=0.3.1,<1",
     "av>=17.1.0",
     "numpy>=1.26",
     "tqdm>=4.0",
