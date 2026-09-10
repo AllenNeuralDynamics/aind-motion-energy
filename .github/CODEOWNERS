@@ -1,0 +1,5 @@
+# Default owners for everything in the repo.
+# TODO: no GitHub Team currently has access to this repo (see tracking
+# issue #16) — replace/extend this with a team once one is assigned
+# Maintainer access.
+* @1mattbecker
