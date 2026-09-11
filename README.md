@@ -3,7 +3,7 @@
 ![support](https://img.shields.io/badge/support-supported-brightgreen)
 [![License](https://img.shields.io/badge/license-MIT-brightgreen)](LICENSE)
 [![CI](https://github.com/AllenNeuralDynamics/aind-motion-energy/actions/workflows/test_lint_type.yml/badge.svg)](https://github.com/AllenNeuralDynamics/aind-motion-energy/actions/workflows/test_lint_type.yml)
-![Coverage](https://img.shields.io/badge/coverage-68%25-yellow)
+![Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue?logo=python)
 
 Motion energy computation from behavior videos for neuroscience pipelines. Targets Code Ocean deployment.
