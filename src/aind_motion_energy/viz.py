@@ -266,8 +266,8 @@ def render_motion_energy_video(
     fig, ax_img, ax_plot, cursor = _build_trace_figure(plt, dpi, trace_t, trace, raw)
 
     img_artist = None
-    container = None
-    stream = None
+    container: Any = None
+    stream: Any = None
     try:
         for j, (frame, _is_key) in enumerate(
             iter_luma_frames(video_path, roi=roi, start_frame=start_frame, end_frame=end_frame)

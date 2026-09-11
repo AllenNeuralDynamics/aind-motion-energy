@@ -24,8 +24,23 @@ jobs:
       - name: Check formatting with Ruff
         run: uv run ruff format --check
 
+  type:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Install UV - set python version to ${{ matrix.python-version }}
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Type check with mypy
+        run: uv run mypy src/aind_motion_energy --strict
+
   test:
-    needs: lint
+    needs: [lint, type]
     runs-on: ubuntu-latest
     strategy:
       matrix:

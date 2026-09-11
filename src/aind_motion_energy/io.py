@@ -94,7 +94,8 @@ def iter_luma_frames(
             if idx >= start:
                 plane = frame.planes[0]
                 # Respect stride (line_size may exceed width due to padding).
-                y = np.frombuffer(plane, np.uint8).reshape(plane.height, plane.line_size)
+                y = np.frombuffer(memoryview(plane), np.uint8)
+                y = y.reshape(plane.height, plane.line_size)
                 y = y[:, : frame.width]
                 if roi is not None:
                     x, y0, w, h = roi
