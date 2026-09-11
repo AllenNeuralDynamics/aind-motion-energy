@@ -87,7 +87,7 @@ The standards page states: *"GitHub automation must use the AIND [reusable workf
 
 ## Justified deviations
 
-The AIND guidance permits per-package deviation where justified. We take six:
+The AIND guidance permits per-package deviation where justified. We take seven:
 
 | Deviation | Justification |
 |---|---|
@@ -97,6 +97,7 @@ The AIND guidance permits per-package deviation where justified. We take six:
 | Capsule branching differs from `dev`/`main` PR flow | The Code Ocean web IDE pushes commits directly to the capsule's attached branch and cannot open PRs, so that branch cannot be protected. The library complies fully; the capsules keep an unprotected `main` attached to CO with `dev` as a staging branch. See X-2. |
 | No self-hosted MkDocs/Read the Docs site (L-10, reverted in #29) | The site (#26) was never published — the RTD project was never imported. Rather than maintain a second, unpublished hosting path, docs hosting is deferred to SciComp's infrastructure. Numpydoc docstrings (L-5) and `examples/` stay regardless of what hosts them. |
 | Manual release process instead of `release-bump-version-uv.yml` (L-9, #31/#33) | The automated workflow needs a `repo-token` secret with push rights to protected `main`; the repo has zero secrets configured and `svc-aindscicomp` is not a collaborator — real cross-team coordination, not a config tweak. For a solo-maintainer repo doing infrequent releases, a manual bump-then-tag satisfies the actual requirement (semver, GitHub Releases, changelog) without that secret/service-account surface. Revisit if release cadence increases. |
+| `dev` → `main` promotion PRs use a merge commit, not squash | The AIND standard requires squash-merge for feature branches into `dev`; it says nothing about the `dev` → `main` step. Squashing that step too (as #28 did) discards the parent link between the two branches' histories, so the next promotion's conflict check falls back to a stale common ancestor and any file both branches touched independently (`CITATION.cff` on every release) shows a false add/add conflict, as happened cutting `v0.2.0` (#31–#33). `main`'s branch protection allows merge commits; `dev`'s requires linear history (squash-only, matching the standard) so the exception can't leak into the wrong branch. |
 
 ### Capsule lint config
 
@@ -135,7 +136,7 @@ Two items change contracts across repo boundaries. Everything else in this plan 
 **X-1 · Land this plan** (#1) — done in `cc1778a`, revised after the source audit.
 
 **X-2 · Branch strategy and commit conventions** (#2) — breaking (B-1).
-`aind-motion-energy` (library) — full compliance. `dev` created from `main`, `dev` default, both protected with 1 required human approval, squash-merge only. Feature branches → PR → `dev` → PR → `main`.
+`aind-motion-energy` (library) — full compliance. `dev` created from `main`, `dev` default, both protected with 1 required human approval. Feature branches → PR → `dev` (squash-merge, the AIND requirement) → PR → `main` (merge commit, not squash — see "Justified deviations" and `CONTRIBUTING.md`).
 Both capsules — documented deviation. Code Ocean stays attached to `main`, which is therefore unprotected. `dev` exists as a staging branch and merges into `main`.
 *Rationale for CO → `main` rather than CO → `dev`:* a capsule run with `version=None` resolves to the attached branch's HEAD. Attaching CO to `dev` would mean any consumer that forgets to pin a version silently runs development code. Pointing CO at `main` keeps the default safe regardless of pinning discipline.
 Conventional-commit PR titles (`feat:` → minor, `fix:` → patch, `feat!:`/`BREAKING CHANGE` → major) documented in each `CONTRIBUTING.md`.
