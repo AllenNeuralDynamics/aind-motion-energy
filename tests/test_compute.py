@@ -8,19 +8,22 @@ from aind_motion_energy.compute import clean_trace, compute_motion_energy
 
 
 def _info(width=4, height=3, n_frames=5, fps=30.0, bit_depth=8, codec_name="h264"):
-    return {"width": width, "height": height, "n_frames": n_frames,
-            "fps": fps, "bit_depth": bit_depth, "color_range": "tv",
-            "codec_name": codec_name}
+    return {
+        "width": width,
+        "height": height,
+        "n_frames": n_frames,
+        "fps": fps,
+        "bit_depth": bit_depth,
+        "color_range": "tv",
+        "codec_name": codec_name,
+    }
 
 
 def _frames(fills, keys=None, height=3, width=4):
     """Build a list of (frame, is_keyframe) tuples from fill values."""
     if keys is None:
         keys = [False] * len(fills)
-    return [
-        (np.full((height, width), v, dtype=np.uint8), k)
-        for v, k in zip(fills, keys)
-    ]
+    return [(np.full((height, width), v, dtype=np.uint8), k) for v, k in zip(fills, keys)]
 
 
 @patch("aind_motion_energy.compute.iter_luma_frames")
@@ -105,8 +108,10 @@ def test_roi_adjusts_pixel_count_and_map_shape(mock_info, mock_iter):
     roi = (2, 2, 4, 3)
     roi_w, roi_h = roi[2], roi[3]
     mock_info.return_value = _info(width=10, height=10, n_frames=2)
-    frames = [(np.zeros((roi_h, roi_w), dtype=np.uint8), False),
-              (np.full((roi_h, roi_w), 20, dtype=np.uint8), False)]
+    frames = [
+        (np.zeros((roi_h, roi_w), dtype=np.uint8), False),
+        (np.full((roi_h, roi_w), 20, dtype=np.uint8), False),
+    ]
     mock_iter.return_value = iter(frames)
 
     me, _, avg_map, meta = compute_motion_energy(Path("fake.mp4"), roi=roi, normalize=True)
@@ -172,9 +177,7 @@ def test_intra_only_codec_never_masks(mock_info, mock_iter):
     H, W = 2, 2
     # mjpeg: every frame is a keyframe, but nothing should be masked
     mock_info.return_value = _info(width=W, height=H, n_frames=3, codec_name="mjpeg")
-    mock_iter.return_value = iter(
-        _frames([0, 10, 20], keys=[True, True, True], height=H, width=W)
-    )
+    mock_iter.return_value = iter(_frames([0, 10, 20], keys=[True, True, True], height=H, width=W))
 
     _, mask, _, meta = compute_motion_energy(Path("fake.mp4"))
 
