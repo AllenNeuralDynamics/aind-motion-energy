@@ -239,8 +239,10 @@ Add numpydoc docstrings to `make_client`, `load_sessions`, `trigger_run`, `captu
 **Trimmed:** replacing the emoji `print()` calls with `logging` moved to #9's sibling issue — the page's logging standard is TBD and the capsule template ships `set -ex`. `mypy --strict` on the batch launcher is also dropped: `type.yml` targets `src/<package>` in a uv project, which this is not.
 *Backing: page — NUMPY docstrings, type hints, ruff, all under "All Packages (Python, Capsule, Pipeline)". Size: M*
 
-**BA-7 · Dockerfile** (#7)
+**BA-7 · Dockerfile** (#7) — ⚠️ **half done**
 Replace `# hash:placeholder` with a real environment hash — the environment has never been built from this file as written, which makes the committed Dockerfile misleading. Add `pip list > /results/pip_list.txt`.
+**Shipped:** the dependency log, in `code/run` (same placement rationale as C-2 — `/results` exists per run, not at image build time).
+**Still open:** `environment/Dockerfile:1` still reads `# hash:placeholder`. This cannot be fixed from a clone — Code Ocean computes that hash when it builds the environment, so the fix is to open the capsule in the Code Ocean UI, rebuild the environment, and let the git sync write the real `# hash:sha256:…` back. The sibling ME capsule already carries a real hash (`6ceefde6…`), which is what this should look like. **Do not hand-write a hash** — an invented one is exactly the misleading state this issue exists to remove.
 **Trimmed:** the Python 3.11 bump and an exact `codeocean` pin are not required — the batch launcher does not install the library, and `codeocean` is an external dependency, not an internal one.
 *Backing: page — pip_list recommendation. Size: XS*
 
@@ -340,12 +342,12 @@ Every issue appears exactly once. Within a phase, issues are independent and can
 | Phase | Issues | Notes |
 |---|---|---|
 | **0 — Immediate** ✅ | X-1, X-2, X-3 | Complete. |
-| **1 — Foundation** | ~~L-1, L-2, L-3~~, C-4, BA-8 | Library items ✅ merged to `dev` (#17, #18, #19). C-4 and BA-8 are largely landed. |
-| **2 — Library CI** | L-4 | Lint + test jobs, plus milestone linking. |
-| **3 — Quality** | L-5, L-11, C-1, C-6, BA-1, BA-5, BA-7 | The widest phase; parallelizes freely across all three repos. |
+| **1 — Foundation** ✅ | ~~L-1, L-2, L-3, C-4, BA-8~~ | Complete. Library items merged to `dev` (#17, #18, #19); C-4 and BA-8 landed in the capsules. |
+| **2 — Library CI** ✅ | ~~L-4~~ | Complete. `test_lint_type.yml` runs lint, type and test jobs on the 3.11/3.12 matrix; `link-issues-by-milestone.yml` landed alongside. |
+| **3 — Quality** ⚠️ | ~~L-5, L-11, C-1, C-6, BA-1, BA-5~~, BA-7 (partial) | All landed except **BA-7's environment hash** — `environment/Dockerfile` still reads `# hash:placeholder`. Its `pip list` half shipped. See the note below. |
 | **4 — Long poles** ✅ | L-7, ~~L-10~~, L-12 | Complete. L-10 landed then reverted (#29) — see [Out of scope](#out-of-scope). |
 | **5 — Release and pin** ✅ | ~~L-9 → C-2~~ | Complete. Tag cut manually (L-9, #31/#33), capsule repinned to `@v0.2.0` (C-2, capsule #11), verified live 2026-09-11. |
-| **6 — Metadata** | M-1 (and BA-2, if kept) | Last, by design. Specify with SciComp input; nothing else waits on it. |
+| **6 — Metadata** | M-1 (and BA-2, if kept) | **The only phase still open.** Last by design; specify with SciComp input. Nothing else waits on it. |
 
 ### Expected CI state during rollout
 
@@ -355,7 +357,7 @@ L-4 turns CI on before the code fully complies. This is intentional — the gate
 |---|---|---|
 | `ruff check` / `ruff format --check` | L-4 | L-1 (already green) |
 | `pytest` on 3.11 | L-4 | immediately |
-| `pytest` on **3.12** | L-4 | unknown — never tested; may need a fix in Phase 2 |
+| `pytest` on **3.12** | L-4 | ✅ passes — verified 2026-09-11, 44 tests green at 100% coverage on both 3.11 and 3.12; no fix was needed |
 | coverage gate | L-4 at **baseline**, raised to 100 by L-7 | L-7 |
 | `mypy --strict` | **L-12**, not L-4 | L-12 |
 
@@ -388,3 +390,20 @@ End to end, after Phase 5 lands:
 4. **Batch real run** — one full session end to end; confirm the manifest shows `completed` with a non-null `result_asset_id` and `_me_metadata.json` reports a frame count matching full video length.
 5. **CI** — open a throwaway PR into `dev` and confirm the workflow runs, the coverage gate enforces, and merging is blocked without an approval.
 6. **After M-1 only** — confirm `processing.json` validates against `aind-data-schema`.
+
+### Last full sweep — 2026-09-11
+
+Run against `dev` at parity with `main` in all three repos (`git diff origin/main origin/dev` empty everywhere; no open PRs; every GitHub Actions run green).
+
+| Check | Result |
+|---|---|
+| `ruff check` / `ruff format --check` (library) | ✅ clean, 20 files |
+| `mypy src/aind_motion_energy --strict` | ✅ no issues, 5 source files |
+| `pytest --cov --cov-fail-under=100` on **3.11** | ✅ 44 passed, **100%** (cli/compute/io/viz all 100%) |
+| `pytest` on **3.12** | ✅ 44 passed, 100% — closes the "never tested" risk L-4 flagged |
+| `ruff check code/` (capsule, batch) | ✅ clean — the ME capsule's `code/` is shell only, so ruff is a no-op there by design |
+| Verification step 1 — library CLI on the local clip | ✅ 15 000 frames decoded (30 s @ 500 fps = full clip), 14 999 diffs, 120 keyframes masked; `_motion_energy.npy`, `_motion_energy_clean.npy`, `_motion_energy_map.npy`, `_keyframe_mask.npy`, `_me_metadata.json` and both `--summary-plots` PNGs written with unchanged names. CSV and the visualization MP4 are opt-in (`--format`, `--visualize`) and were correctly absent. |
+| Verification step 2 — capsule image | ✅ done under C-2: `pip_list.txt` from a live run reports `aind-motion-energy 0.2.0` |
+| Verification steps 3–5 | Not re-run this sweep — 3 and 4 need Code Ocean credentials, 5 needs a throwaway PR |
+
+**Only open work:** BA-7's environment hash (needs a Code Ocean environment rebuild — see BA-7) and Phase 6 (M-1, plus BA-2 if kept).
