@@ -121,7 +121,7 @@ Two items change contracts across repo boundaries. Everything else in this plan 
 | # | Change | Blast radius | Sequencing |
 |---|---|---|---|
 | **B-1** | **`dev`/`main` branch strategy + conventional commits** (X-2) | The library gets protected `dev` + `main`, so no more direct pushes. The capsules keep an unprotected `main` for the Code Ocean web IDE plus a `dev` staging branch. | Done first, before any other PR. ✅ complete |
-| **B-2** | **Tagged releases replace SHA pins** (L-9) — the capsule Dockerfile installs `…@2e62934…`. Standards require GitHub Releases and semantic versioning. | Capsule Dockerfile; forces a Code Ocean environment rebuild. | `v0.2.0` tag and GitHub Release exist (L-9 ✅). C-2 can now change the pin to `@v0.2.0`. |
+| **B-2** | **Tagged releases replace SHA pins** (L-9) — the capsule Dockerfile installed `…@2e62934…`. Standards require GitHub Releases and semantic versioning. | Capsule Dockerfile; forces a Code Ocean environment rebuild. | `v0.2.0` tag and GitHub Release exist (L-9 ✅); capsule Dockerfile repinned to `@v0.2.0` (C-2 ✅). ✅ complete in git — **the Code Ocean environment rebuild + sync is still outstanding**, so the pin is not yet live at runtime. |
 
 **Non-breaking but worth flagging:** the library requires Python `>=3.11` while the ME capsule Dockerfile starts from a `python3.9` Code Ocean base image and does `conda install python=3.11` on top. Latent fragility, noted in C-2.
 
@@ -203,9 +203,12 @@ A job in the reference `test_lint_type.yml` composition, so it is required. Add 
 Currently two lines. Add the support badge. Document: required input assets and mount layout, every output file and its naming, the `"$@"` passthrough contract (which today exists only as a comment inside `code/run`), which parameters are baked in by the capsule (`--summary-plots`) versus supplied by the batch launcher, and a link to the library repo.
 *Backing: page — support badge. The rest is the minimum a README needs to be usable. Size: S*
 
-**C-2 · Dockerfile: release pin and dependency log** (#2) — related to B-2
+**C-2 · Dockerfile: release pin and dependency log** (#2) — breaking (B-2), ✅ done — capsule PR #11, promoted to `main`
 Pin the library to the release tag from L-9 instead of the bare SHA. Add `pip list > /results/pip_list.txt`, the page's recommended dependency log for containerized environments.
-**Trimmed:** SHA-pinning `aind-dynamic-foraging-behavior-video-analysis@main`, pinning `pynwb`, re-evaluating the redundant `apt-get install ffmpeg`, and swapping to a Python 3.11 base image are all reasonable but none is required by any source. Fold them in opportunistically while the file is open; do not block on them.
+Shipped both. The Dockerfile now installs `aind-motion-energy[viz] @ …@v0.2.0`; `2e62934` is an ancestor of the tag, so the per-camera output-key fix the SHA pin existed for is preserved, and `--input` / `--output` / `--summary-plots` are unchanged at `v0.2.0`, so `code/run` keeps working. The dependency log went into **`code/run`, not the Dockerfile** — `/results` exists per run, not at image build time — and is written *before* the analysis so it survives a failed run. The `"$@"` passthrough contract was not touched.
+**Folded in:** SHA-pinned `aind-dynamic-foraging-behavior-video-analysis` from `@main` to `@b21eac0`. Pinning a branch to its current HEAD installs the same code a rebuild-today with `@main` would, so it carries no behavior delta — it only removes the drift.
+**Trimmed:** pinning `pynwb` (any range would be invented without evidence, and it serves the example notebook, not the capsule runtime), dropping `apt-get install ffmpeg` (PyAV bundles ffmpeg *libraries*, but the line also supplies the ffmpeg *binary*; removal risks a runtime break unverifiable from the CLI), and the Python 3.11 base image (a `FROM` change invalidates the registered base image — see the latent-fragility note under B-2). None is required by any source.
+**Manual step outstanding:** the capsule has no Dockerfile build in CI, so the new pins do not take effect at runtime until the environment is rebuilt and synced through the Code Ocean Environment UI. That rebuild is the only real verification that the pins resolve together.
 *Backing: page — pip_list recommendation; L-9 makes the tag exist. Size: S · Depends on: L-9*
 
 **C-4 · Capsule lint config and CI** (#4)
@@ -341,7 +344,7 @@ Every issue appears exactly once. Within a phase, issues are independent and can
 | **2 — Library CI** | L-4 | Lint + test jobs, plus milestone linking. |
 | **3 — Quality** | L-5, L-11, C-1, C-6, BA-1, BA-5, BA-7 | The widest phase; parallelizes freely across all three repos. |
 | **4 — Long poles** ✅ | L-7, ~~L-10~~, L-12 | Complete. L-10 landed then reverted (#29) — see [Out of scope](#out-of-scope). |
-| **5 — Release and pin** | L-9 → C-2 | Serial, two steps: cut the tag, then point the capsule at it. |
+| **5 — Release and pin** ✅ | ~~L-9 → C-2~~ | Complete in git. Tag cut manually (L-9, #31/#33), capsule repinned to `@v0.2.0` (C-2, capsule #11). The Code Ocean environment rebuild + sync remains outstanding before the pin is live at runtime. |
 | **6 — Metadata** | M-1 (and BA-2, if kept) | Last, by design. Specify with SciComp input; nothing else waits on it. |
 
 ### Expected CI state during rollout
