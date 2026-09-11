@@ -87,7 +87,7 @@ The standards page states: *"GitHub automation must use the AIND [reusable workf
 
 ## Justified deviations
 
-The AIND guidance permits per-package deviation where justified. We take five:
+The AIND guidance permits per-package deviation where justified. We take seven:
 
 | Deviation | Justification |
 |---|---|
@@ -96,6 +96,8 @@ The AIND guidance permits per-package deviation where justified. We take five:
 | Capsules are not uv projects; CI uses `pip install ruff` rather than `uv run …` | A Code Ocean capsule is executed, never installed. It is not a Python package, so it has no `[project]` table and no build backend for uv to drive. |
 | Capsule branching differs from `dev`/`main` PR flow | The Code Ocean web IDE pushes commits directly to the capsule's attached branch and cannot open PRs, so that branch cannot be protected. The library complies fully; the capsules keep an unprotected `main` attached to CO with `dev` as a staging branch. See X-2. |
 | No self-hosted MkDocs/Read the Docs site (L-10, reverted in #29) | The site (#26) was never published — the RTD project was never imported. Rather than maintain a second, unpublished hosting path, docs hosting is deferred to SciComp's infrastructure. Numpydoc docstrings (L-5) and `examples/` stay regardless of what hosts them. |
+| Manual release process instead of `release-bump-version-uv.yml` (L-9, #31/#33) | The automated workflow needs a `repo-token` secret with push rights to protected `main`; the repo has zero secrets configured and `svc-aindscicomp` is not a collaborator — real cross-team coordination, not a config tweak. For a solo-maintainer repo doing infrequent releases, a manual bump-then-tag satisfies the actual requirement (semver, GitHub Releases, changelog) without that secret/service-account surface. Revisit if release cadence increases. |
+| `dev` → `main` promotion PRs use a merge commit, not squash | The AIND standard requires squash-merge for feature branches into `dev`; it says nothing about the `dev` → `main` step. Squashing that step too (as #28 did) discards the parent link between the two branches' histories, so the next promotion's conflict check falls back to a stale common ancestor and any file both branches touched independently (`CITATION.cff` on every release) shows a false add/add conflict, as happened cutting `v0.2.0` (#31–#33). `main`'s branch protection allows merge commits; `dev`'s requires linear history (squash-only, matching the standard) so the exception can't leak into the wrong branch. |
 
 ### Capsule lint config
 
@@ -119,7 +121,7 @@ Two items change contracts across repo boundaries. Everything else in this plan 
 | # | Change | Blast radius | Sequencing |
 |---|---|---|---|
 | **B-1** | **`dev`/`main` branch strategy + conventional commits** (X-2) | The library gets protected `dev` + `main`, so no more direct pushes. The capsules keep an unprotected `main` for the Code Ocean web IDE plus a `dev` staging branch. | Done first, before any other PR. ✅ complete |
-| **B-2** | **Tagged releases replace SHA pins** (L-9) — the capsule Dockerfile installs `…@2e62934…`. Standards require GitHub Releases and semantic versioning. | Capsule Dockerfile; forces a Code Ocean environment rebuild. | Release workflow must exist first (L-9), then C-2 changes the pin to `@v0.2.0`. |
+| **B-2** | **Tagged releases replace SHA pins** (L-9) — the capsule Dockerfile installed `…@2e62934…`. Standards require GitHub Releases and semantic versioning. | Capsule Dockerfile; forces a Code Ocean environment rebuild. | `v0.2.0` tag and GitHub Release exist (L-9 ✅); capsule Dockerfile repinned to `@v0.2.0` (C-2 ✅). ✅ complete — pin verified live 2026-09-11. |
 
 **Non-breaking but worth flagging:** the library requires Python `>=3.11` while the ME capsule Dockerfile starts from a `python3.9` Code Ocean base image and does `conda install python=3.11` on top. Latent fragility, noted in C-2.
 
@@ -134,7 +136,7 @@ Two items change contracts across repo boundaries. Everything else in this plan 
 **X-1 · Land this plan** (#1) — done in `cc1778a`, revised after the source audit.
 
 **X-2 · Branch strategy and commit conventions** (#2) — breaking (B-1).
-`aind-motion-energy` (library) — full compliance. `dev` created from `main`, `dev` default, both protected with 1 required human approval, squash-merge only. Feature branches → PR → `dev` → PR → `main`.
+`aind-motion-energy` (library) — full compliance. `dev` created from `main`, `dev` default, both protected with 1 required human approval. Feature branches → PR → `dev` (squash-merge, the AIND requirement) → PR → `main` (merge commit, not squash — see "Justified deviations" and `CONTRIBUTING.md`).
 Both capsules — documented deviation. Code Ocean stays attached to `main`, which is therefore unprotected. `dev` exists as a staging branch and merges into `main`.
 *Rationale for CO → `main` rather than CO → `dev`:* a capsule run with `version=None` resolves to the attached branch's HEAD. Attaching CO to `dev` would mean any consumer that forgets to pin a version silently runs development code. Pointing CO at `main` keeps the default safe regardless of pinning discipline.
 Conventional-commit PR titles (`feat:` → minor, `fix:` → patch, `feat!:`/`BREAKING CHANGE` → major) documented in each `CONTRIBUTING.md`.
@@ -176,8 +178,9 @@ Convert every docstring to numpydoc `Parameters`/`Returns` sections. Fill the mi
 The largest work item. `cli.py` has zero tests and `save_summary_plots` has zero tests — together they are the entire gap to the required 100%. Add `tests/test_cli.py` covering argument parsing, video discovery, the `stem = video.parent.name if video.stem == "video"` camera-keying heuristic, each `--format` branch, and each optional-output branch; add `save_summary_plots` tests to `tests/test_viz.py`. Add `[tool.coverage.report] fail_under = 100` with `omit = ["*__init__*"]`, and put the gate in `[tool.pytest.ini_options] addopts = "--cov=aind_motion_energy --cov-fail-under=100"` so it applies even under a bare `pytest tests/`. Reuse the existing `_FakePlane` fixture pattern from [`tests/test_io.py`](../tests/test_io.py).
 *Backing: page — "Coverage must be at 100%". Size: L · Depends on: L-4 (raises its gate)*
 
-**L-9 · Release workflow and first tagged release** (#12) — breaking (B-2)
-Adapt `release-bump-version-uv.yml` to run on merge to `main`. It computes the bump from conventional-commit prefixes, runs `uv version` + `uv lock`, commits `ci: version bump [skip actions]`, and pushes the tag — so it needs a `repo-token` secret with push rights to a protected branch (coordinate with X-2). Cut `v0.2.0` with autogenerated GitHub Release notes, which satisfies the changelog requirement. GitHub Releases only, no PyPI — the page says internal-use packages install directly from GitHub Releases, and the sole consumer is the capsule Dockerfile.
+**L-9 · Release workflow and first tagged release** (#12) — breaking (B-2), ✅ done — manual process, not the plan's automation
+The plan called for adapting `release-bump-version-uv.yml` to run on merge to `main`, computing the bump from conventional-commit prefixes and pushing a version-bump commit + tag automatically. That did **not** land: the workflow needs a `repo-token` secret with push rights to protected `main`, the repo has zero secrets configured, and `svc-aindscicomp` (the service account the AIND template expects for this) is not a collaborator — real cross-team coordination, not a config tweak. See "Justified deviations" below.
+Did instead, entirely by hand: `uv version 0.2.0` + `uv lock` and matching `CITATION.cff` updates (#31, PR into `dev`), promoted `dev` → `main` (#33), then `git tag v0.2.0 && git push origin v0.2.0` and `gh release create v0.2.0 --generate-notes` directly against `main`. Satisfies the actual requirement — semver, GitHub Releases, changelog — without the secret/service-account surface. GitHub Releases only, no PyPI, per plan.
 *Backing: page — semver, conventional commits, GitHub Releases, changelog. Size: M · Depends on: L-2 · Blocks: C-2*
 
 **L-10 · MkDocs, Read the Docs, and `examples/`** (#13) — ~~landed~~, **reverted**
@@ -200,9 +203,12 @@ A job in the reference `test_lint_type.yml` composition, so it is required. Add 
 Currently two lines. Add the support badge. Document: required input assets and mount layout, every output file and its naming, the `"$@"` passthrough contract (which today exists only as a comment inside `code/run`), which parameters are baked in by the capsule (`--summary-plots`) versus supplied by the batch launcher, and a link to the library repo.
 *Backing: page — support badge. The rest is the minimum a README needs to be usable. Size: S*
 
-**C-2 · Dockerfile: release pin and dependency log** (#2) — related to B-2
+**C-2 · Dockerfile: release pin and dependency log** (#2) — breaking (B-2), ✅ done — capsule PR #11, promoted to `main`
 Pin the library to the release tag from L-9 instead of the bare SHA. Add `pip list > /results/pip_list.txt`, the page's recommended dependency log for containerized environments.
-**Trimmed:** SHA-pinning `aind-dynamic-foraging-behavior-video-analysis@main`, pinning `pynwb`, re-evaluating the redundant `apt-get install ffmpeg`, and swapping to a Python 3.11 base image are all reasonable but none is required by any source. Fold them in opportunistically while the file is open; do not block on them.
+Shipped both. The Dockerfile now installs `aind-motion-energy[viz] @ …@v0.2.0`; `2e62934` is an ancestor of the tag, so the per-camera output-key fix the SHA pin existed for is preserved, and `--input` / `--output` / `--summary-plots` are unchanged at `v0.2.0`, so `code/run` keeps working. The dependency log went into **`code/run`, not the Dockerfile** — `/results` exists per run, not at image build time — and is written *before* the analysis so it survives a failed run. The `"$@"` passthrough contract was not touched.
+**Folded in:** SHA-pinned `aind-dynamic-foraging-behavior-video-analysis` from `@main` to `@b21eac0`. Pinning a branch to its current HEAD installs the same code a rebuild-today with `@main` would, so it carries no behavior delta — it only removes the drift.
+**Trimmed:** pinning `pynwb` (any range would be invented without evidence, and it serves the example notebook, not the capsule runtime), dropping `apt-get install ffmpeg` (PyAV bundles ffmpeg *libraries*, but the line also supplies the ffmpeg *binary*; removal risks a runtime break unverifiable from the CLI), and the Python 3.11 base image (a `FROM` change invalidates the registered base image — see the latent-fragility note under B-2). None is required by any source.
+**Verified live (2026-09-11):** `pip_list.txt` from a capsule run reports `aind-motion-energy 0.2.0`.
 *Backing: page — pip_list recommendation; L-9 makes the tag exist. Size: S · Depends on: L-9*
 
 **C-4 · Capsule lint config and CI** (#4)
@@ -338,7 +344,7 @@ Every issue appears exactly once. Within a phase, issues are independent and can
 | **2 — Library CI** | L-4 | Lint + test jobs, plus milestone linking. |
 | **3 — Quality** | L-5, L-11, C-1, C-6, BA-1, BA-5, BA-7 | The widest phase; parallelizes freely across all three repos. |
 | **4 — Long poles** ✅ | L-7, ~~L-10~~, L-12 | Complete. L-10 landed then reverted (#29) — see [Out of scope](#out-of-scope). |
-| **5 — Release and pin** | L-9 → C-2 | Serial, two steps: cut the tag, then point the capsule at it. |
+| **5 — Release and pin** ✅ | ~~L-9 → C-2~~ | Complete. Tag cut manually (L-9, #31/#33), capsule repinned to `@v0.2.0` (C-2, capsule #11), verified live 2026-09-11. |
 | **6 — Metadata** | M-1 (and BA-2, if kept) | Last, by design. Specify with SciComp input; nothing else waits on it. |
 
 ### Expected CI state during rollout
