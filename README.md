@@ -76,19 +76,7 @@ stem = video.parent.name if video.stem == "video" else video.stem
 
 The [capsule](https://github.com/AllenNeuralDynamics/aind-motion-energy-capsule) depends on this convention when matching outputs back to input cameras — changing it is a breaking change for that repo.
 
-## Documentation
-
-Full documentation — including the API reference generated from the docstrings —
-is a MkDocs + mkdocstrings site under [`docs/`](docs/), built locally with:
-
-```bash
-uv run mkdocs serve          # live preview at http://127.0.0.1:8000
-uv run mkdocs build --strict
-```
-
-Hosting on Read the Docs is configured in [`.readthedocs.yaml`](.readthedocs.yaml);
-the RTD project still has to be imported once from readthedocs.org before the
-site is published.
+## Examples
 
 Runnable examples live in [`examples/`](examples/).
 
