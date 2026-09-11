@@ -1,3 +1,5 @@
+"""Motion energy computation from behavior videos for neuroscience pipelines."""
+
 from .compute import clean_trace, compute_motion_energy
 from .io import get_video_info, iter_luma_frames
 from .viz import render_motion_energy_video, save_summary_plots
