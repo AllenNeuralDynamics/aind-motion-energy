@@ -85,7 +85,8 @@ def discover_videos(input_path: Path, extensions: set[str]) -> list[Path]:
         raise ValueError(
             "multiple videos would write the same output files:\n"
             + "\n".join(lines)
-            + "\nRestrict which files are processed, e.g. --extensions .mp4"
+            + "\nTheir outputs would overwrite each other. Narrow --input to a single data "
+            + "asset, or pick one copy per camera with --extensions (e.g. --extensions .mp4)."
         )
     return videos
 
