@@ -180,6 +180,81 @@ def test_camera_keying_uses_own_stem_when_not_video(
     assert (out / "bottom_camera_motion_energy.npy").exists()
 
 
+# --- --extensions filter and output-key collisions ----------------------------
+
+
+def _flat_session(tmp_path):
+    """Old flat AIND layout: each camera saved as both .avi and .mp4."""
+    vids = tmp_path / "in" / "behavior-videos"
+    vids.mkdir(parents=True)
+    for name in ("bottom_camera.avi", "bottom_camera.mp4", "side_camera_right.avi"):
+        (vids / name).touch()
+    (vids / "side_camera_right.MP4").touch()
+    return tmp_path / "in"
+
+
+@patch("aind_motion_energy.cli.compute_motion_energy")
+def test_duplicate_camera_keys_error_before_processing(mock_compute, monkeypatch, tmp_path, capsys):
+    input_dir = _flat_session(tmp_path)
+
+    monkeypatch.setattr(
+        sys, "argv", ["prog", "--input", str(input_dir), "--output", str(tmp_path / "out")]
+    )
+    with pytest.raises(SystemExit):
+        main()
+
+    mock_compute.assert_not_called()
+    err = capsys.readouterr().err
+    assert "bottom_camera" in err and "side_camera_right" in err
+    assert "--extensions" in err
+
+
+@pytest.mark.parametrize("ext", [".mp4", "mp4", ".MP4"])
+@patch("aind_motion_energy.cli.clean_trace")
+@patch("aind_motion_energy.cli.compute_motion_energy")
+def test_extensions_filter_selects_one_copy_per_camera(
+    mock_compute, mock_clean, monkeypatch, tmp_path, ext
+):
+    input_dir = _flat_session(tmp_path)
+    out = tmp_path / "out"
+    mock_compute.return_value = _fake_compute_result()
+    mock_clean.return_value = np.zeros(4, dtype=np.float32)
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["prog", "--input", str(input_dir), "--output", str(out), "--extensions", ext],
+    )
+    main()
+
+    called = sorted(c.args[0].name for c in mock_compute.call_args_list)
+    assert called == ["bottom_camera.mp4", "side_camera_right.MP4"]
+    assert (out / "bottom_camera_motion_energy.npy").exists()
+    assert (out / "side_camera_right_motion_energy.npy").exists()
+
+
+@patch("aind_motion_energy.cli.clean_trace")
+@patch("aind_motion_energy.cli.compute_motion_energy")
+def test_same_filename_in_distinct_camera_folders_does_not_collide(
+    mock_compute, mock_clean, monkeypatch, tmp_path
+):
+    for cam in ("BottomCamera", "SideCameraRight"):
+        (tmp_path / "in" / cam).mkdir(parents=True)
+        (tmp_path / "in" / cam / "video.mp4").touch()
+    out = tmp_path / "out"
+    mock_compute.return_value = _fake_compute_result()
+    mock_clean.return_value = np.zeros(4, dtype=np.float32)
+
+    monkeypatch.setattr(
+        sys, "argv", ["prog", "--input", str(tmp_path / "in"), "--output", str(out)]
+    )
+    main()
+
+    assert mock_compute.call_count == 2
+    assert (out / "BottomCamera_motion_energy.npy").exists()
+    assert (out / "SideCameraRight_motion_energy.npy").exists()
+
+
 # --- --format branches --------------------------------------------------------
 
 
