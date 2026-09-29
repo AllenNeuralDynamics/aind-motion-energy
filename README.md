@@ -36,6 +36,7 @@ uv run aind-motion-energy --input data/my_video.mp4 --output results/ --summary-
 | Flag | Default | Description |
 |---|---|---|
 | `--input` | *(required)* | Video file or directory of videos. |
+| `--extensions EXT [EXT ...]` | all video types | Only process these extensions when `--input` is a directory (e.g. `--extensions .mp4`). Case-insensitive; leading dot optional. |
 | `--output` | `results/` | Output directory. |
 | `--roi X Y W H` | full frame | Region of interest in pixels. |
 | `--no-normalize` | off | Skip per-pixel normalization (output raw summed differences instead of dividing by pixel count). |
@@ -73,6 +74,8 @@ For each processed video, files are written to `--output` under a shared name st
 ```python
 stem = video.parent.name if video.stem == "video" else video.stem
 ```
+
+Older flat layouts can store the same camera twice (e.g. `bottom_camera.avi` and `bottom_camera.mp4`), which would map to the same `{stem}`. The CLI refuses to start in that case and lists the colliding files; pick one copy per camera with `--extensions`.
 
 The [capsule](https://github.com/AllenNeuralDynamics/aind-motion-energy-capsule) depends on this convention when matching outputs back to input cameras — changing it is a breaking change for that repo.
 
