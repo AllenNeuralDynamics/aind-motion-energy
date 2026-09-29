@@ -11,11 +11,98 @@ from .compute import clean_trace, compute_motion_energy
 VIDEO_EXTENSIONS = {".mp4", ".avi", ".mkv", ".mov", ".mj2", ".tif", ".tiff"}
 
 
+def camera_key(video: Path) -> str:
+    """Return the camera identity used to name a video's output files.
+
+    New AIND layout nests each camera as ``<CameraName>/video.mp4``, so every
+    camera shares the stem ``video``; use the parent folder name instead. Old
+    flat layout (e.g. ``bottom_camera.avi``) already carries the camera in the
+    stem.
+
+    Parameters
+    ----------
+    video : Path
+        Path to the video file.
+
+    Returns
+    -------
+    str
+        Prefix for this video's output files.
+    """
+    return video.parent.name if video.stem == "video" else video.stem
+
+
+def find_key_collisions(videos: list[Path]) -> dict[str, list[Path]]:
+    """Find videos that would write to the same output files.
+
+    Parameters
+    ----------
+    videos : list[Path]
+        Videos to be processed.
+
+    Returns
+    -------
+    dict[str, list[Path]]
+        Camera key -> the two or more videos sharing it (e.g. the same camera
+        saved as both ``bottom_camera.avi`` and ``bottom_camera.mp4``). Empty
+        if every video has a distinct key.
+    """
+    by_key: dict[str, list[Path]] = {}
+    for video in videos:
+        by_key.setdefault(camera_key(video), []).append(video)
+    return {key: paths for key, paths in by_key.items() if len(paths) > 1}
+
+
+def discover_videos(input_path: Path, extensions: set[str]) -> list[Path]:
+    """List the videos to process and check their output names are distinct.
+
+    Parameters
+    ----------
+    input_path : Path
+        A single video file (processed as-is), or a directory searched
+        recursively.
+    extensions : set[str]
+        Lower-case extensions with leading dot to include from a directory.
+
+    Returns
+    -------
+    list[Path]
+        Videos to process, sorted; empty if none matched.
+
+    Raises
+    ------
+    ValueError
+        If two videos would write the same output files. Raised up front so a
+        later video can't silently overwrite an earlier one's outputs.
+    """
+    if input_path.is_file():
+        return [input_path]
+    videos = sorted(p for p in input_path.rglob("*") if p.suffix.lower() in extensions)
+
+    collisions = find_key_collisions(videos)
+    if collisions:
+        lines = [f"  {key}: " + ", ".join(map(str, paths)) for key, paths in collisions.items()]
+        raise ValueError(
+            "multiple videos would write the same output files:\n"
+            + "\n".join(lines)
+            + "\nTheir outputs would overwrite each other. Narrow --input to a single data "
+            + "asset, or pick one copy per camera with --extensions (e.g. --extensions .mp4)."
+        )
+    return videos
+
+
+def _normalize_extension(ext: str) -> str:
+    """Lower-case an extension and ensure it has a leading dot (``MP4`` -> ``.mp4``)."""
+    ext = ext.lower()
+    return ext if ext.startswith(".") else f".{ext}"
+
+
 def main() -> None:
     """Parse CLI arguments and compute motion energy for each discovered video.
 
     Discovers videos under ``--input`` (a single file, or a directory searched
-    recursively for known video extensions), computes motion energy for each,
+    recursively for ``--extensions``), refuses to run if two videos would write
+    the same output files, computes motion energy for each,
     and writes the raw trace, cleaned trace, keyframe mask, average motion
     map, and metadata to ``--output``. Optionally also writes CSV output,
     static summary plots, and a rendered visualization video, depending on
@@ -27,6 +114,15 @@ def main() -> None:
         type=Path,
         required=True,
         help="Video file or directory of videos",
+    )
+    parser.add_argument(
+        "--extensions",
+        nargs="+",
+        type=_normalize_extension,
+        default=sorted(VIDEO_EXTENSIONS),
+        metavar="EXT",
+        help="Video extensions to process when --input is a directory, e.g. "
+        "'--extensions .mp4' (default: all of " + ", ".join(sorted(VIDEO_EXTENSIONS)) + ")",
     )
     parser.add_argument(
         "--output",
@@ -108,10 +204,10 @@ def main() -> None:
     args.output.mkdir(parents=True, exist_ok=True)
     roi = tuple(args.roi) if args.roi else None
 
-    if args.input.is_file():
-        videos = [args.input]
-    else:
-        videos = sorted(p for p in args.input.rglob("*") if p.suffix.lower() in VIDEO_EXTENSIONS)
+    try:
+        videos = discover_videos(args.input, set(args.extensions))
+    except ValueError as e:
+        parser.error(str(e))
 
     if not videos:
         print(f"No videos found in {args.input}")
@@ -127,12 +223,7 @@ def main() -> None:
             mask_keyframes=not args.no_mask_keyframes,
         )
         me_clean = clean_trace(me, keyframe_mask, method=args.clean_method)
-        # Key outputs on the camera identity, not the bare file stem.
-        # New AIND layout nests each camera as <CameraName>/video.mp4, so every
-        # camera shares the stem "video" and would overwrite the others; use the
-        # parent folder name instead. Old flat layout (e.g. bottom_camera.avi)
-        # already carries the camera in the stem.
-        stem = video.parent.name if video.stem == "video" else video.stem
+        stem = camera_key(video)
 
         np.save(args.output / f"{stem}_motion_energy.npy", me)
         np.save(args.output / f"{stem}_motion_energy_clean.npy", me_clean)
