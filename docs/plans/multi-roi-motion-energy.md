@@ -1,5 +1,8 @@
 # Multi-ROI motion energy (binary masks as the common pathway)
 
+> **Status:** implemented on `feat/multi-roi-masks`. Deviations from the original
+> plan, each found during implementation, are marked **[as built]** below.
+
 ## Context
 Today the library computes one motion-energy trace for one rectangle (`--roi X Y W H`) or for the full frame. Users want:
 - many ROIs (~100);
@@ -24,7 +27,7 @@ Each frame is processed as follows:
 1. Decode the full luma frame with the existing `iter_luma_frames`, with no crop.
 2. Compute `diff = |f - prev|` as int16 over the full frame. This happens once, and it is needed anyway for the full-frame column and the map.
 3. Reduce the full-frame column with `diff.sum()`.
-4. Reduce all ROIs in **one vectorized call**: `np.add.reduceat(diff.ravel().take(flat_idx), offsets, dtype=int64)`. Here `flat_idx` is the precomputed concatenation of every ROI's mask pixel indices (int32), and `offsets` holds each ROI's start position. The cost is the total mask pixel count, there is no Python loop over K, and no new dependency is needed.
+4. Reduce all ROIs in **one vectorized call**: `np.add.reduceat(diff.ravel()[flat_idx], offsets, dtype=uint32)`. Here `flat_idx` is the precomputed concatenation of every ROI's mask pixel indices, and `offsets` holds each ROI's start position. The cost is the total mask pixel count, there is no Python loop over K, and no new dependency is needed. **[as built]** The kernel was first written with `take` and int32 indices and an int64 accumulator, which measured 2.6 ms/frame for 100 ROIs. Switching to `intp` fancy indexing and a uint32 accumulator (uint64 for masks over ~16.8M px) brought that to 0.64 ms. Numbers are in `docs/design-notes.md`.
 5. Accumulate the map into a **uint32** accumulator instead of float64. The result is still exact (no overflow below ~16M frames) and uses half the memory bandwidth. This addresses the "~45% runtime" map cost in `docs/optimization-backlog.md`. The diff is computed regardless; the cost is in the accumulation.
 
 Empty masks are rejected at load time, because `reduceat` misbehaves on zero-length segments. Optimizations to benchmark later and record in the backlog:
@@ -55,7 +58,7 @@ Empty masks are rejected at load time, because `reduceat` misbehaves on zero-len
 - `RoiSet.check_frame_shape(H, W)` raises a clear error if the masks don't match the video.
 - `RoiSet.reduce(diff) -> int64[K]` is the kernel from step 4.
 - **Size guard on total mask area, not on K.** Both the per-frame cost and the `flat_idx` memory scale with `sum(pixel_counts)`, not with K.
-  - **Warning** when the total exceeds 4× the frame area. The message prints the total, the multiple of the frame area, and the estimated `flat_idx` memory.
+  - **Warning** when the total exceeds 2× the frame area. **[as built]** Lowered from 4× after the benchmark: at 2× the frame area throughput is about 30% of whole-frame-only, and at 4× it's about 16%. The message prints the total, the multiple of the frame area, and the estimated `flat_idx` memory.
   - **Error** above 20× the frame area, which catches garbage input such as a mask with every pixel set in every channel.
   - **Warning** when K > 256, about output size and plot readability.
   - These thresholds are module constants and will be tuned after the benchmark.
@@ -106,7 +109,7 @@ Empty masks are rejected at load time, because `reduceat` misbehaves on zero-len
 - README: CLI flags, the Outputs table (new NPZ schema), and a "ROIs" section on the mask contract and filename matching.
 - `docs/design-notes.md`: one entry covering "masks as the common pathway", "single-pass reduceat kernel" and "NPZ output (why, and its limits)".
 - `docs/optimization-backlog.md`: update the map item (uint32 accumulator), and add the rectangle fast path, summed-area table and sparse matmul.
-- Bump to 0.4.0.
+- Bump to 0.4.0. **[as built]** Deferred to a separate `chore:` PR, matching how this repo has done past bumps (#44).
 - Update `examples/` notebook for the new outputs.
 - Follow-ups in other repos, which this PR does not touch:
   - **`aind-motion-energy-capsule`:** pass through `--roi-masks`, and read the new NPZ.
