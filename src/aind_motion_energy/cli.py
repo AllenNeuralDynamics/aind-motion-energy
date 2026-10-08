@@ -6,7 +6,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .compute import clean_trace, compute_motion_energy
+from .compute import align_to_frames, clean_trace, compute_motion_energy
 
 VIDEO_EXTENSIONS = {".mp4", ".avi", ".mkv", ".mov", ".mj2", ".tif", ".tiff"}
 
@@ -97,17 +97,8 @@ def _normalize_extension(ext: str) -> str:
     return ext if ext.startswith(".") else f".{ext}"
 
 
-def main() -> None:
-    """Parse CLI arguments and compute motion energy for each discovered video.
-
-    Discovers videos under ``--input`` (a single file, or a directory searched
-    recursively for ``--extensions``), refuses to run if two videos would write
-    the same output files, computes motion energy for each,
-    and writes the raw trace, cleaned trace, keyframe mask, average motion
-    map, and metadata to ``--output``. Optionally also writes CSV output,
-    static summary plots, and a rendered visualization video, depending on
-    the flags passed.
-    """
+def _build_parser() -> argparse.ArgumentParser:
+    """Build the argument parser for the ``aind-motion-energy`` CLI."""
     parser = argparse.ArgumentParser(description="Compute motion energy from behavior videos")
     parser.add_argument(
         "--input",
@@ -199,6 +190,98 @@ def main() -> None:
         default=1,
         help="Render every Nth frame in the visualization (default: 1 = lossless)",
     )
+    return parser
+
+
+def _process_video(
+    video: Path, args: argparse.Namespace, roi: tuple[int, int, int, int] | None
+) -> None:
+    """Compute motion energy for one video and write its outputs to ``args.output``."""
+    me, keyframe_mask, avg_map, meta = compute_motion_energy(
+        video,
+        roi=roi,
+        normalize=not args.no_normalize,
+        start_frame=args.start_frame,
+        end_frame=args.end_frame,
+        mask_keyframes=not args.no_mask_keyframes,
+    )
+    me_clean = clean_trace(me, keyframe_mask, method=args.clean_method)
+    stem = camera_key(video)
+
+    # Frame-align at the output edge: one value per decoded frame, frame 0 = 0.
+    me = align_to_frames(me, fill=0.0)
+    me_clean = align_to_frames(me_clean, fill=0.0)
+    keyframe_mask = align_to_frames(keyframe_mask, fill=False)
+    meta["n_output_frames"] = len(me)
+    meta["first_frame_fill"] = 0.0
+
+    np.save(args.output / f"{stem}_motion_energy.npy", me)
+    np.save(args.output / f"{stem}_motion_energy_clean.npy", me_clean)
+    np.save(args.output / f"{stem}_keyframe_mask.npy", keyframe_mask)
+    np.save(args.output / f"{stem}_motion_energy_map.npy", avg_map)
+
+    if args.format in ("csv", "both"):
+        import csv
+
+        with open(args.output / f"{stem}_motion_energy.csv", "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["frame_index", "motion_energy", "motion_energy_clean", "is_keyframe"])
+            first = args.start_frame or 0
+            frame_index = range(first, first + len(me))
+            writer.writerows(zip(frame_index, me, me_clean, keyframe_mask))
+
+    with open(args.output / f"{stem}_me_metadata.json", "w") as f:
+        json.dump(meta, f, indent=2)
+
+    print(
+        f"{stem}: {len(me)} frames | {meta['n_keyframes_masked']} keyframes | "
+        f"max={me.max():.4f} | mean={me.mean():.4f}"
+    )
+
+    if args.summary_plots:
+        from .viz import save_summary_plots
+
+        trace_png, map_png = save_summary_plots(
+            args.output,
+            stem,
+            me,
+            me_clean,
+            avg_map,
+            fps=meta["fps"],
+        )
+        print(f"  saved {trace_png.name}, {map_png.name}")
+
+    if args.visualize:
+        from .viz import render_motion_energy_video
+
+        mp4_path = render_motion_energy_video(
+            video,
+            me_clean,
+            fps_source=meta["fps"],
+            output_path=args.output / f"{stem}_motion_energy.mp4",
+            raw_trace=me,
+            roi=roi,
+            start_frame=args.start_frame,
+            end_frame=args.end_frame,
+            window_seconds=args.viz_window_seconds,
+            out_fps=args.viz_fps,
+            stride=args.viz_stride,
+        )
+        print(f"  rendered {mp4_path}")
+
+
+def main() -> None:
+    """Parse CLI arguments and compute motion energy for each discovered video.
+
+    Discovers videos under ``--input`` (a single file, or a directory searched
+    recursively for ``--extensions``), refuses to run if two videos would write
+    the same output files, computes motion energy for each,
+    and writes the raw trace, cleaned trace, keyframe mask, average motion
+    map, and metadata to ``--output``. Optionally also writes CSV output,
+    static summary plots, and a rendered visualization video, depending on
+    the flags passed.
+    """
+    parser = _build_parser()
     args = parser.parse_args()
 
     args.output.mkdir(parents=True, exist_ok=True)
@@ -214,67 +297,4 @@ def main() -> None:
         return
 
     for video in videos:
-        me, keyframe_mask, avg_map, meta = compute_motion_energy(
-            video,
-            roi=roi,
-            normalize=not args.no_normalize,
-            start_frame=args.start_frame,
-            end_frame=args.end_frame,
-            mask_keyframes=not args.no_mask_keyframes,
-        )
-        me_clean = clean_trace(me, keyframe_mask, method=args.clean_method)
-        stem = camera_key(video)
-
-        np.save(args.output / f"{stem}_motion_energy.npy", me)
-        np.save(args.output / f"{stem}_motion_energy_clean.npy", me_clean)
-        np.save(args.output / f"{stem}_keyframe_mask.npy", keyframe_mask)
-        np.save(args.output / f"{stem}_motion_energy_map.npy", avg_map)
-
-        if args.format in ("csv", "both"):
-            import csv
-
-            with open(args.output / f"{stem}_motion_energy.csv", "w", newline="") as f:
-                writer = csv.writer(f)
-                writer.writerow(
-                    ["frame_index", "motion_energy", "motion_energy_clean", "is_keyframe"]
-                )
-                writer.writerows(zip(range(len(me)), me, me_clean, keyframe_mask))
-
-        with open(args.output / f"{stem}_me_metadata.json", "w") as f:
-            json.dump(meta, f, indent=2)
-
-        print(
-            f"{stem}: {len(me)} diffs | {meta['n_keyframes_masked']} keyframes | "
-            f"max={me.max():.4f} | mean={me.mean():.4f}"
-        )
-
-        if args.summary_plots:
-            from .viz import save_summary_plots
-
-            trace_png, map_png = save_summary_plots(
-                args.output,
-                stem,
-                me,
-                me_clean,
-                avg_map,
-                fps=meta["fps"],
-            )
-            print(f"  saved {trace_png.name}, {map_png.name}")
-
-        if args.visualize:
-            from .viz import render_motion_energy_video
-
-            mp4_path = render_motion_energy_video(
-                video,
-                me_clean,
-                fps_source=meta["fps"],
-                output_path=args.output / f"{stem}_motion_energy.mp4",
-                raw_trace=me,
-                roi=roi,
-                start_frame=args.start_frame,
-                end_frame=args.end_frame,
-                window_seconds=args.viz_window_seconds,
-                out_fps=args.viz_fps,
-                stride=args.viz_stride,
-            )
-            print(f"  rendered {mp4_path}")
+        _process_video(video, args, roi)

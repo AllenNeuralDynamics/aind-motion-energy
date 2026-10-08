@@ -168,3 +168,28 @@ def clean_trace(
         out[keyframe_mask] = np.interp(idx[keyframe_mask], idx[good], out[good])
         return out
     raise ValueError(f"Unknown method: {method!r} (expected 'interpolate' or 'nan')")
+
+
+def align_to_frames(per_diff: np.ndarray, fill: Any = 0.0) -> np.ndarray:
+    """Pad a per-diff array to one entry per video frame.
+
+    Motion energy is computed per frame-to-frame diff, so ``N`` decoded frames
+    give ``N - 1`` values. Assigning each diff ``|f[i] - f[i-1]|`` to the later
+    frame ``i`` and filling frame 0 makes outputs line up 1:1 with frame
+    timestamps and other per-frame data (pose tracking, neural traces).
+
+    Parameters
+    ----------
+    per_diff : numpy.ndarray
+        Array of shape ``(N - 1, ...)``, one entry per diff along axis 0.
+    fill : Any, optional
+        Value for the first frame, which has no preceding frame, by default
+        ``0.0``. Use ``False`` for boolean masks.
+
+    Returns
+    -------
+    numpy.ndarray
+        Array of shape ``(N, ...)`` with the same dtype as `per_diff`.
+    """
+    head = np.full((1, *per_diff.shape[1:]), fill, dtype=per_diff.dtype)
+    return np.concatenate([head, per_diff], axis=0)

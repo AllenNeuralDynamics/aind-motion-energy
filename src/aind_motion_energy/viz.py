@@ -206,8 +206,9 @@ def render_motion_energy_video(
     below it with a thin cursor. The displayed pixels are the exact Y-plane array
     motion energy was computed on (identical to native for monochrome cameras).
 
-    `trace` has one fewer entry than the number of frames. The x-axis is source
-    time in seconds, independent of `out_fps`. `out_fps` only sets playback
+    `trace` is frame-aligned: one entry per rendered frame, ``trace[0]`` being
+    the first frame (see `align_to_frames`). The x-axis is source time in
+    seconds, independent of `out_fps`. `out_fps` only sets playback
     speed of the output file (no frames are dropped).
 
     Parameters
@@ -261,8 +262,8 @@ def render_motion_energy_video(
     if stride < 1:
         raise ValueError(f"stride must be >= 1 (got {stride})")
 
-    # trace[m] is the diff ending at frame (start + m + 1); place it at that time.
-    trace_t = (start + np.arange(len(trace)) + 1) / fps_source
+    # trace[m] belongs to frame (start + m); place it at that frame's time.
+    trace_t = (start + np.arange(len(trace))) / fps_source
     fig, ax_img, ax_plot, cursor = _build_trace_figure(plt, dpi, trace_t, trace, raw)
 
     img_artist = None

@@ -4,7 +4,7 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
-from aind_motion_energy.compute import clean_trace, compute_motion_energy
+from aind_motion_energy.compute import align_to_frames, clean_trace, compute_motion_energy
 
 
 def _info(width=4, height=3, n_frames=5, fps=30.0, bit_depth=8, codec_name="h264"):
@@ -227,3 +227,19 @@ def test_clean_trace_bad_method_raises():
     mask = np.array([False, True])
     with pytest.raises(ValueError):
         clean_trace(me, mask, method="bogus")
+
+
+def test_align_to_frames_prepends_fill_for_first_frame():
+    me = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+    out = align_to_frames(me)
+    np.testing.assert_array_equal(out, [0.0, 1.0, 2.0, 3.0])
+    assert out.dtype == np.float32
+
+
+def test_align_to_frames_bool_and_2d():
+    mask = np.array([True, False])
+    np.testing.assert_array_equal(align_to_frames(mask, fill=False), [False, True, False])
+    me2d = np.ones((3, 2), dtype=np.float32)
+    out = align_to_frames(me2d)
+    assert out.shape == (4, 2)
+    np.testing.assert_array_equal(out[0], [0.0, 0.0])

@@ -33,7 +33,7 @@ def test_renders_one_output_frame_per_decoded_frame(mock_iter, mock_open, tmp_pa
     mock_iter.return_value = iter(_frames(5))
     captured = []
     mock_open.return_value = _fake_container(captured)
-    trace = np.arange(4, dtype=np.float32)  # N-1 entries
+    trace = np.arange(5, dtype=np.float32)  # frame-aligned: one per frame
 
     out = render_motion_energy_video(
         Path("fake.mp4"),

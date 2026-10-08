@@ -57,15 +57,19 @@ For each processed video, files are written to `--output` under a shared name st
 
 | File | Written when | Contents |
 |---|---|---|
-| `{stem}_motion_energy.npy` | always | Raw motion-energy trace (`float32`, one value per frame-to-frame diff). |
+| `{stem}_motion_energy.npy` | always | Raw motion-energy trace (`float32`, one value per frame; see *Frame alignment* below). |
 | `{stem}_motion_energy_clean.npy` | always | Cleaned trace with keyframe-contaminated diffs handled per `--clean-method`. |
-| `{stem}_keyframe_mask.npy` | always | Bool mask flagging which diffs were keyframe-contaminated. |
+| `{stem}_keyframe_mask.npy` | always | Bool mask flagging which frames' diffs were keyframe-contaminated. |
 | `{stem}_motion_energy_map.npy` | always | Per-pixel average absolute frame difference, shape `(H, W)`. |
 | `{stem}_me_metadata.json` | always | Video properties and processing parameters (fps, codec, dimensions, ROI, frame range, etc.). |
-| `{stem}_motion_energy.csv` | `--format csv` or `both` | Per-frame `frame_index, motion_energy, motion_energy_clean, is_keyframe`. |
+| `{stem}_motion_energy.csv` | `--format csv` or `both` | Per-frame `frame_index, motion_energy, motion_energy_clean, is_keyframe`; `frame_index` is the real video frame number. |
 | `{stem}_motion_energy.png` | `--summary-plots` | Motion-energy timeseries plot. |
 | `{stem}_motion_energy_map.png` | `--summary-plots` | Heatmap of `{stem}_motion_energy_map.npy`. |
 | `{stem}_motion_energy.mp4` | `--visualize` | Rendered video with a synced, scrolling motion-energy plot. |
+
+### Frame alignment
+
+Saved traces have one value per decoded frame. Each frame-to-frame diff `|f[i] - f[i-1]|` is assigned to the later frame `i`, and the first frame (which has no predecessor) is `0` (`False` in the keyframe mask). Index `i` of every output therefore lines up with video frame `start_frame + i`, matching frame timestamps and other per-frame data. The library function `compute_motion_energy` still returns the raw per-diff arrays (length `N - 1`); `align_to_frames` performs the padding.
 
 ### Camera-keying heuristic
 

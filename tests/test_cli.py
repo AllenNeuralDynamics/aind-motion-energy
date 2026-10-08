@@ -328,3 +328,50 @@ def test_visualize_flag_invokes_render_motion_energy_video(
     assert kwargs["fps_source"] == 30.0
     assert kwargs["output_path"] == out / "clip_motion_energy.mp4"
     assert "rendered" in capsys.readouterr().out
+
+
+# --- frame alignment ----------------------------------------------------------
+
+
+@patch("aind_motion_energy.cli.compute_motion_energy")
+def test_outputs_are_frame_aligned(mock_compute, monkeypatch, tmp_path):
+    import csv
+    import json
+
+    video = tmp_path / "clip.mp4"
+    video.touch()
+    out = tmp_path / "out"
+    me = np.array([5.0, 6.0, 7.0], dtype=np.float32)  # 4 frames -> 3 diffs
+    mask = np.array([False, True, False])
+    mock_compute.return_value = (
+        me,
+        mask,
+        np.zeros((2, 2), np.float32),
+        {"fps": 30.0, "n_keyframes_masked": 1},
+    )
+
+    argv = [
+        "prog",
+        "--input",
+        str(video),
+        "--output",
+        str(out),
+        "--format",
+        "both",
+        "--start-frame",
+        "10",
+    ]
+    monkeypatch.setattr(sys, "argv", argv)
+    main()
+
+    saved = np.load(out / "clip_motion_energy.npy")
+    np.testing.assert_array_equal(saved, [0.0, 5.0, 6.0, 7.0])
+    np.testing.assert_array_equal(
+        np.load(out / "clip_keyframe_mask.npy"), [False, False, True, False]
+    )
+    with open(out / "clip_motion_energy.csv") as f:
+        rows = list(csv.reader(f))
+    assert [r[0] for r in rows[1:]] == ["10", "11", "12", "13"]
+    meta = json.loads((out / "clip_me_metadata.json").read_text())
+    assert meta["n_output_frames"] == 4
+    assert meta["first_frame_fill"] == 0.0
