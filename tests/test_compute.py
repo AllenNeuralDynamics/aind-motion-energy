@@ -4,7 +4,13 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
-from aind_motion_energy.compute import align_to_frames, clean_trace, compute_motion_energy
+from aind_motion_energy.compute import (
+    MotionEnergyResult,
+    align_to_frames,
+    clean_trace,
+    compute_motion_energy,
+)
+from aind_motion_energy.rois import RoiSet
 
 
 def _info(width=4, height=3, n_frames=5, fps=30.0, bit_depth=8, codec_name="h264"):
@@ -17,6 +23,11 @@ def _info(width=4, height=3, n_frames=5, fps=30.0, bit_depth=8, codec_name="h264
         "color_range": "tv",
         "codec_name": codec_name,
     }
+
+
+def _legacy(res: MotionEnergyResult):
+    """Full-frame view of a result, in the old (me, mask, avg_map, meta) shape."""
+    return res.me[:, 0], res.keyframe_mask, res.avg_map, res.metadata
 
 
 def _frames(fills, keys=None, height=3, width=4):
@@ -33,7 +44,7 @@ def test_scalar_value_no_normalize(mock_info, mock_iter):
     mock_info.return_value = _info(width=W, height=H, n_frames=2)
     mock_iter.return_value = iter(_frames([10, 20], height=H, width=W))
 
-    me, _, _, _ = compute_motion_energy(Path("fake.mp4"), normalize=False)
+    me, _, _, _ = _legacy(compute_motion_energy(Path("fake.mp4"), normalize=False))
 
     assert me.shape == (1,)
     assert me[0] == pytest.approx(10.0 * H * W)
@@ -46,7 +57,7 @@ def test_normalization_divides_by_pixel_count(mock_info, mock_iter):
     mock_info.return_value = _info(width=W, height=H, n_frames=2)
     mock_iter.return_value = iter(_frames([0, 10], height=H, width=W))
 
-    me, _, _, _ = compute_motion_energy(Path("fake.mp4"), normalize=True)
+    me, _, _, _ = _legacy(compute_motion_energy(Path("fake.mp4"), normalize=True))
 
     assert me[0] == pytest.approx(10.0)
 
@@ -60,7 +71,7 @@ def test_output_shapes(mock_info, mock_iter):
     mock_info.return_value = _info(width=W, height=H, n_frames=N)
     mock_iter.return_value = iter(frames)
 
-    me, mask, avg_map, _ = compute_motion_energy(Path("fake.mp4"))
+    me, mask, avg_map, _ = _legacy(compute_motion_energy(Path("fake.mp4")))
 
     assert me.shape == (N - 1,)
     assert mask.shape == (N - 1,)
@@ -77,7 +88,7 @@ def test_avg_map_is_mean_of_per_pixel_diffs(mock_info, mock_iter):
     mock_info.return_value = _info(width=W, height=H, n_frames=3)
     mock_iter.return_value = iter(_frames([0, 10, 20], height=H, width=W))
 
-    _, _, avg_map, _ = compute_motion_energy(Path("fake.mp4"), normalize=False)
+    _, _, avg_map, _ = _legacy(compute_motion_energy(Path("fake.mp4"), normalize=False))
 
     np.testing.assert_allclose(avg_map, np.full((H, W), 10.0, dtype=np.float32))
 
@@ -89,37 +100,18 @@ def test_metadata_fields(mock_info, mock_iter):
     mock_info.return_value = _info(width=W, height=H, n_frames=3, fps=60.0)
     mock_iter.return_value = iter(_frames([0, 5, 10], height=H, width=W))
 
-    _, _, _, meta = compute_motion_energy(Path("fake.mp4"), normalize=True)
+    _, _, _, meta = _legacy(compute_motion_energy(Path("fake.mp4"), normalize=True))
 
     assert meta["n_frames_decoded"] == 3
     assert meta["n_me_frames"] == 2
     assert meta["fps"] == 60.0
     assert meta["codec_name"] == "h264"
     assert meta["normalized"] is True
-    assert meta["roi"] is None
-    assert meta["pixel_count"] == H * W
+    assert meta["n_rois"] == 0
+    assert meta["roi_ids"] == ["full_frame"]
+    assert meta["pixel_counts"] == [H * W]
     assert meta["width"] == W
     assert meta["height"] == H
-
-
-@patch("aind_motion_energy.compute.iter_luma_frames")
-@patch("aind_motion_energy.compute.get_video_info")
-def test_roi_adjusts_pixel_count_and_map_shape(mock_info, mock_iter):
-    roi = (2, 2, 4, 3)
-    roi_w, roi_h = roi[2], roi[3]
-    mock_info.return_value = _info(width=10, height=10, n_frames=2)
-    frames = [
-        (np.zeros((roi_h, roi_w), dtype=np.uint8), False),
-        (np.full((roi_h, roi_w), 20, dtype=np.uint8), False),
-    ]
-    mock_iter.return_value = iter(frames)
-
-    me, _, avg_map, meta = compute_motion_energy(Path("fake.mp4"), roi=roi, normalize=True)
-
-    assert meta["pixel_count"] == roi_h * roi_w
-    assert meta["roi"] == list(roi)
-    assert avg_map.shape == (roi_h, roi_w)
-    assert me[0] == pytest.approx(20.0)
 
 
 @patch("aind_motion_energy.compute.iter_luma_frames")
@@ -129,7 +121,7 @@ def test_frame_window_stored_in_metadata(mock_info, mock_iter):
     mock_info.return_value = _info(width=W, height=H, n_frames=1000)
     mock_iter.return_value = iter(_frames([0, 5, 10], height=H, width=W))
 
-    _, _, _, meta = compute_motion_energy(Path("fake.mp4"), start_frame=100, end_frame=200)
+    _, _, _, meta = _legacy(compute_motion_energy(Path("fake.mp4"), start_frame=100, end_frame=200))
 
     assert meta["start_frame"] == 100
     assert meta["end_frame"] == 200
@@ -145,7 +137,7 @@ def test_keyframe_masks_both_adjacent_diffs(mock_info, mock_iter):
         _frames([0, 10, 20, 30, 40], keys=[False, False, True, False, False], height=H, width=W)
     )
 
-    me, mask, _, meta = compute_motion_energy(Path("fake.mp4"), normalize=False)
+    me, mask, _, meta = _legacy(compute_motion_energy(Path("fake.mp4"), normalize=False))
 
     assert me.shape == (4,)
     np.testing.assert_array_equal(mask, [False, True, True, False])
@@ -164,7 +156,7 @@ def test_keyframe_excluded_from_avg_map(mock_info, mock_iter):
         _frames([0, 10, 20, 30, 36], keys=[False, False, True, False, False], height=H, width=W)
     )
 
-    _, mask, avg_map, _ = compute_motion_energy(Path("fake.mp4"), normalize=False)
+    _, mask, avg_map, _ = _legacy(compute_motion_energy(Path("fake.mp4"), normalize=False))
 
     # unmasked diffs: me[0]=10, me[3]=6  → map mean = 8
     np.testing.assert_array_equal(mask, [False, True, True, False])
@@ -179,7 +171,7 @@ def test_intra_only_codec_never_masks(mock_info, mock_iter):
     mock_info.return_value = _info(width=W, height=H, n_frames=3, codec_name="mjpeg")
     mock_iter.return_value = iter(_frames([0, 10, 20], keys=[True, True, True], height=H, width=W))
 
-    _, mask, _, meta = compute_motion_energy(Path("fake.mp4"))
+    _, mask, _, meta = _legacy(compute_motion_energy(Path("fake.mp4")))
 
     assert not mask.any()
     assert meta["n_keyframes_masked"] == 0
@@ -194,7 +186,7 @@ def test_mask_keyframes_false_disables_masking(mock_info, mock_iter):
         _frames([0, 10, 20], keys=[False, True, False], height=H, width=W)
     )
 
-    _, mask, _, _ = compute_motion_energy(Path("fake.mp4"), mask_keyframes=False)
+    _, mask, _, _ = _legacy(compute_motion_energy(Path("fake.mp4"), mask_keyframes=False))
 
     assert not mask.any()
 
@@ -243,3 +235,88 @@ def test_align_to_frames_bool_and_2d():
     out = align_to_frames(me2d)
     assert out.shape == (4, 2)
     np.testing.assert_array_equal(out[0], [0.0, 0.0])
+
+
+# --- ROIs ---------------------------------------------------------------------
+
+
+def _roi_frames(n=4, h=6, w=8, seed=0):
+    rng = np.random.default_rng(seed)
+    return [(rng.integers(0, 255, (h, w), dtype=np.uint8), False) for _ in range(n)]
+
+
+@patch("aind_motion_energy.compute.iter_luma_frames")
+@patch("aind_motion_energy.compute.get_video_info")
+def test_roi_columns_match_brute_force_masked_sums(mock_info, mock_iter):
+    H, W = 6, 8
+    frames = _roi_frames(h=H, w=W)
+    rng = np.random.default_rng(1)
+    masks = rng.integers(0, 2, (H, W, 3), dtype=np.uint8)
+    masks[0, 0, :] = 1  # guarantee non-empty
+    rois = RoiSet.from_masks(masks, ["a", "b", "c"])
+    mock_info.return_value = _info(width=W, height=H, n_frames=len(frames))
+    mock_iter.return_value = iter(frames)
+
+    res = compute_motion_energy(Path("fake.mp4"), rois=rois, normalize=True)
+
+    assert res.roi_ids == ("full_frame", "a", "b", "c")
+    assert res.me.shape == (len(frames) - 1, 4)
+    for i in range(1, len(frames)):
+        diff = np.abs(frames[i][0].astype(int) - frames[i - 1][0].astype(int))
+        assert res.me[i - 1, 0] == pytest.approx(diff.mean())
+        for k in range(3):
+            assert res.me[i - 1, k + 1] == pytest.approx(diff[masks[..., k] == 1].mean())
+    np.testing.assert_array_equal(res.pixel_counts, [H * W, *masks.sum(axis=(0, 1))])
+    assert res.roi_bboxes.shape == (4, 4)
+    np.testing.assert_array_equal(res.roi_bboxes[0], [0, 0, W, H])
+    assert res.avg_map.shape == (H, W)
+    assert res.metadata["n_rois"] == 3
+
+
+@patch("aind_motion_energy.compute.iter_luma_frames")
+@patch("aind_motion_energy.compute.get_video_info")
+def test_box_roi_not_normalized_gives_raw_sum(mock_info, mock_iter):
+    H, W = 10, 10
+    mock_info.return_value = _info(width=W, height=H, n_frames=2)
+    mock_iter.return_value = iter(_frames([0, 20], height=H, width=W))
+    rois = RoiSet.from_box((2, 2, 4, 3), (H, W))
+
+    res = compute_motion_energy(Path("fake.mp4"), rois=rois, normalize=False)
+
+    np.testing.assert_allclose(res.me[0], [20.0 * H * W, 20.0 * 12])
+
+
+@patch("aind_motion_energy.compute.get_video_info")
+def test_roi_frame_shape_mismatch_raises(mock_info):
+    mock_info.return_value = _info(width=8, height=6)
+    rois = RoiSet.from_box((0, 0, 2, 2), (10, 10))
+    with pytest.raises(ValueError, match="10x10"):
+        compute_motion_energy(Path("fake.mp4"), rois=rois)
+
+
+@patch("aind_motion_energy.compute.iter_luma_frames")
+@patch("aind_motion_energy.compute.get_video_info")
+def test_empty_decode_gives_empty_traces(mock_info, mock_iter):
+    mock_info.return_value = _info(width=4, height=3)
+    mock_iter.return_value = iter([])
+    rois = RoiSet.from_box((0, 0, 2, 2), (3, 4))
+
+    res = compute_motion_energy(Path("fake.mp4"), rois=rois)
+
+    assert res.me.shape == (0, 2)
+    assert res.keyframe_mask.shape == (0,)
+
+
+def test_clean_trace_2d_interpolates_every_column():
+    me = np.array([[1, 10], [9, 9], [9, 9], [4, 40]], dtype=np.float32)
+    mask = np.array([False, True, True, False])
+    out = clean_trace(me, mask)
+    np.testing.assert_allclose(out[:, 0], [1, 2, 3, 4])
+    np.testing.assert_allclose(out[:, 1], [10, 20, 30, 40])
+    np.testing.assert_allclose(me[1], [9, 9])  # input untouched
+
+
+def test_clean_trace_2d_nan_blanks_whole_rows():
+    me = np.ones((3, 2), dtype=np.float32)
+    out = clean_trace(me, np.array([False, True, False]), method="nan")
+    assert np.isnan(out[1]).all() and not np.isnan(out[[0, 2]]).any()

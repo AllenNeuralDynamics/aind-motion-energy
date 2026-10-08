@@ -212,3 +212,99 @@ def test_save_summary_plots_accepts_str_output_dir(tmp_path):
 
     assert trace_path.parent == tmp_path
     assert map_path.parent == tmp_path
+
+
+# --- multi-ROI --------------------------------------------------------------
+
+
+def _rois(h=8, w=10, k=2):
+    from aind_motion_energy.rois import RoiSet
+
+    masks = np.zeros((h, w, k), np.uint8)
+    for i in range(k):
+        masks[i % h, : 2 + i % (w - 2), i] = 1
+    return RoiSet.from_masks(masks, [f"r{i}" for i in range(k)])
+
+
+@pytest.mark.parametrize("k", [2, 50])
+def test_save_summary_plots_with_rois(tmp_path, k):
+    rng = np.random.default_rng(0)
+    me = rng.random((30, 1 + k)).astype(np.float32)
+    me[:, 1] = 0.5  # a flat (dead) ROI must not break the z-score
+    mask = np.zeros(30, dtype=bool)
+    mask[[5, 6]] = True
+    rois = _rois(k=k)
+
+    trace_path, map_path = save_summary_plots(
+        tmp_path,
+        "camC",
+        me,
+        me,
+        np.zeros((8, 10), np.float32),
+        fps=30.0,
+        roi_ids=["full_frame", *rois.ids],
+        keyframe_mask=mask,
+        rois=rois,
+        dpi=50,
+    )
+
+    assert trace_path.stat().st_size > 0 and map_path.stat().st_size > 0
+
+
+def test_roi_ids_length_must_match_columns(tmp_path):
+    me = np.zeros((3, 2), np.float32)
+    with pytest.raises(ValueError, match="2 trace columns"):
+        save_summary_plots(tmp_path, "x", me, me, np.zeros((2, 2)), fps=1.0, roi_ids=["a"])
+
+
+@patch("aind_motion_energy.viz.av.open")
+@patch("aind_motion_energy.viz.iter_luma_frames")
+def test_render_with_rois_and_selection(mock_iter, mock_open, tmp_path):
+    mock_iter.return_value = iter(_frames(4))
+    captured = []
+    mock_open.return_value = _fake_container(captured)
+    rois = _rois(k=3)
+    trace = np.random.default_rng(0).random((4, 4)).astype(np.float32)
+
+    render_motion_energy_video(
+        Path("fake.mp4"),
+        trace,
+        fps_source=500.0,
+        output_path=tmp_path / "viz.mp4",
+        raw_trace=trace,
+        roi_ids=["full_frame", *rois.ids],
+        rois=rois,
+        viz_rois=["r2", "r0"],  # no full_frame -> raw line dropped
+        dpi=50,
+    )
+
+    assert _encoded_frame_count(captured) == 4
+
+
+@patch("aind_motion_energy.viz.av.open")
+@patch("aind_motion_energy.viz.iter_luma_frames")
+def test_render_default_selection_with_unnamed_columns(mock_iter, mock_open, tmp_path):
+    mock_iter.return_value = iter(_frames(3))
+    captured = []
+    mock_open.return_value = _fake_container(captured)
+
+    render_motion_energy_video(
+        Path("fake.mp4"),
+        np.zeros((3, 7), np.float32),
+        fps_source=500.0,
+        output_path=tmp_path / "viz.mp4",
+        dpi=50,
+    )
+
+    assert _encoded_frame_count(captured) == 3
+
+
+def test_render_unknown_viz_rois_raises(tmp_path):
+    with pytest.raises(ValueError, match="unknown viz_rois"):
+        render_motion_energy_video(
+            Path("fake.mp4"),
+            np.zeros((3, 2), np.float32),
+            fps_source=500.0,
+            output_path=tmp_path / "viz.mp4",
+            viz_rois=["nope"],
+        )
