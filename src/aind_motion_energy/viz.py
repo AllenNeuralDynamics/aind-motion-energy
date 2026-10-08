@@ -77,14 +77,26 @@ def _draw_roi_outlines(plt: Any, ax: Any, rois: RoiSet, lw: float = 1.0) -> None
 
 
 def _zscore_binned(values: np.ndarray, max_bins: int) -> np.ndarray:
-    """Per-column z-score of ``(T, K)`` values, mean-pooled to at most `max_bins` rows."""
+    """Per-column z-score of ``(T, K)`` values, NaN-mean-pooled to at most `max_bins` rows.
+
+    NaNs (e.g. frame 0, which has no preceding frame) are ignored; a bin with
+    no finite values stays NaN and renders blank.
+    """
     n = len(values)
     n_bins = max(1, min(n, max_bins))
-    edges = np.linspace(0, n, n_bins + 1).astype(int)
-    pooled = np.add.reduceat(values, edges[:-1], axis=0) / np.diff(edges)[:, None]
-    std = pooled.std(axis=0)
+    starts = np.linspace(0, n, n_bins + 1).astype(int)[:-1]
+    valid = np.isfinite(values)
+    sums = np.add.reduceat(np.where(valid, values, 0.0), starts, axis=0)
+    counts = np.add.reduceat(valid, starts, axis=0, dtype=np.int64)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        pooled = sums / counts
+    finite = np.isfinite(pooled)
+    n_finite = np.maximum(finite.sum(axis=0), 1)
+    mean = np.where(finite, pooled, 0.0).sum(axis=0) / n_finite
+    var = np.where(finite, (pooled - mean) ** 2, 0.0).sum(axis=0) / n_finite
+    std = np.sqrt(var)
     std[std == 0] = 1.0
-    return np.asarray((pooled - pooled.mean(axis=0)) / std, dtype=np.float32)
+    return np.asarray((pooled - mean) / std, dtype=np.float32)
 
 
 def _plot_full_frame(ax: Any, t: np.ndarray, raw: np.ndarray, clean: np.ndarray) -> None:
@@ -260,9 +272,9 @@ def _build_trace_figure(
     ax_plot.spines["top"].set_visible(False)
     ax_plot.spines["right"].set_visible(False)
     plotted = [tr for _, tr, _ in traces] + ([raw] if raw is not None else [])
-    if len(trace_t) and plotted:
-        upper = max(float(a.max()) for a in plotted)
-        lower = min(float(a.min()) for a in plotted)
+    finite = np.concatenate([a[np.isfinite(a)] for a in plotted]) if plotted else np.array([])
+    if finite.size:
+        upper, lower = float(finite.max()), float(finite.min())
         pad = 0.05 * ((upper - lower) or 1.0)
         ax_plot.set_ylim(lower - pad, upper + pad)
     fig.tight_layout()
@@ -349,7 +361,8 @@ def render_motion_energy_video(
     (identical to native for monochrome cameras).
 
     `trace` is frame-aligned: one row per rendered frame, ``trace[0]`` being
-    the first frame (see `align_to_frames`). The x-axis is source time in
+    the first frame (see `align_to_frames`); NaNs (such as frame 0) show as
+    gaps in the plotted line. The x-axis is source time in
     seconds, independent of `out_fps`. `out_fps` only sets playback speed of
     the output file (no frames are dropped).
 

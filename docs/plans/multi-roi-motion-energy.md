@@ -20,7 +20,7 @@ Agreed decisions:
 - **CSV:** wide.
 - **Release:** a breaking 0.4.0.
 
-**Prerequisite:** land the deferred frame-alignment change first as its own PR (outputs length N, first frame = 0; see the memory `todo-frame-align-me-outputs`). Everything below assumes length-N outputs.
+**Prerequisite:** land the deferred frame-alignment change first as its own PR (outputs length N, first frame = 0; see the memory `todo-frame-align-me-outputs`). Everything below assumes length-N outputs. **[as built]** Frame 0 is NaN rather than 0 (`False` in the keyframe mask). Its motion energy is undefined, and a zero would look like a real "no motion" frame, bias means, and create an outlier at t = 0 under z-scoring. Plots and the CLI summary are NaN-aware.
 
 ## Performance model (one decode, shared diff)
 Each frame is processed as follows:

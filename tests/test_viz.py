@@ -308,3 +308,39 @@ def test_render_unknown_viz_rois_raises(tmp_path):
             output_path=tmp_path / "viz.mp4",
             viz_rois=["nope"],
         )
+
+
+def test_zscore_binned_ignores_nan_and_keeps_empty_bins_blank():
+    from aind_motion_energy.viz import _zscore_binned
+
+    values = np.array([[np.nan, np.nan], [1.0, np.nan], [3.0, np.nan]], dtype=np.float32)
+    z = _zscore_binned(values, max_bins=3)
+
+    assert np.isnan(z[0, 0])  # bin with no finite values stays blank
+    np.testing.assert_allclose(z[1:, 0], [-1.0, 1.0])  # NaN didn't poison the column
+    assert np.isnan(z[:, 1]).all()  # all-NaN column stays blank, no crash
+
+
+def test_save_summary_plots_with_nan_first_frame(tmp_path):
+    me = np.random.default_rng(0).random((20, 3)).astype(np.float32)
+    me[0] = np.nan
+    rois = _rois(h=30, w=40, k=2)
+
+    trace_path, _ = save_summary_plots(
+        tmp_path, "nan", me, me, np.zeros((30, 40), np.float32), fps=10.0, rois=rois, dpi=50
+    )
+
+    assert trace_path.stat().st_size > 0
+
+
+@patch("aind_motion_energy.viz.av.open")
+@patch("aind_motion_energy.viz.iter_luma_frames")
+def test_render_with_nan_and_all_nan_traces(mock_iter, mock_open, tmp_path):
+    for trace in (np.array([np.nan, 1.0, 2.0], np.float32), np.full(3, np.nan, np.float32)):
+        mock_iter.return_value = iter(_frames(3))
+        captured = []
+        mock_open.return_value = _fake_container(captured)
+        render_motion_energy_video(
+            Path("fake.mp4"), trace, fps_source=500.0, output_path=tmp_path / "v.mp4", dpi=50
+        )
+        assert _encoded_frame_count(captured) == 3

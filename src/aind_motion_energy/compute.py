@@ -228,7 +228,7 @@ def clean_trace(
     raise ValueError(f"Unknown method: {method!r} (expected 'interpolate' or 'nan')")
 
 
-def align_to_frames(per_diff: np.ndarray, fill: Any = 0.0) -> np.ndarray:
+def align_to_frames(per_diff: np.ndarray, fill: Any = None) -> np.ndarray:
     """Pad a per-diff array to one entry per video frame.
 
     Motion energy is computed per frame-to-frame diff, so ``N`` decoded frames
@@ -236,18 +236,24 @@ def align_to_frames(per_diff: np.ndarray, fill: Any = 0.0) -> np.ndarray:
     frame ``i`` and filling frame 0 makes outputs line up 1:1 with frame
     timestamps and other per-frame data (pose tracking, neural traces).
 
+    Frame 0 has no preceding frame, so its motion energy is undefined rather
+    than zero: float arrays get NaN by default, so the gap can't be mistaken
+    for "no motion" (use NaN-aware reductions such as `numpy.nanmean`).
+
     Parameters
     ----------
     per_diff : numpy.ndarray
         Array of shape ``(N - 1, ...)``, one entry per diff along axis 0.
     fill : Any, optional
-        Value for the first frame, which has no preceding frame, by default
-        ``0.0``. Use ``False`` for boolean masks.
+        Value for the first frame. By default NaN for floating-point arrays and
+        ``False``/``0`` for boolean/integer ones (which can't hold NaN).
 
     Returns
     -------
     numpy.ndarray
         Array of shape ``(N, ...)`` with the same dtype as `per_diff`.
     """
+    if fill is None:
+        fill = np.nan if np.issubdtype(per_diff.dtype, np.floating) else 0
     head = np.full((1, *per_diff.shape[1:]), fill, dtype=per_diff.dtype)
     return np.concatenate([head, per_diff], axis=0)

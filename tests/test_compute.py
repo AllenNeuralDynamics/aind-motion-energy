@@ -221,20 +221,25 @@ def test_clean_trace_bad_method_raises():
         clean_trace(me, mask, method="bogus")
 
 
-def test_align_to_frames_prepends_fill_for_first_frame():
+def test_align_to_frames_pads_float_with_nan():
     me = np.array([1.0, 2.0, 3.0], dtype=np.float32)
     out = align_to_frames(me)
-    np.testing.assert_array_equal(out, [0.0, 1.0, 2.0, 3.0])
+    np.testing.assert_array_equal(out, [np.nan, 1.0, 2.0, 3.0])
     assert out.dtype == np.float32
 
 
-def test_align_to_frames_bool_and_2d():
+def test_align_to_frames_bool_pads_false_not_nan():
+    # np.full(nan, dtype=bool) would give True; the default must give False.
     mask = np.array([True, False])
-    np.testing.assert_array_equal(align_to_frames(mask, fill=False), [False, True, False])
+    np.testing.assert_array_equal(align_to_frames(mask), [False, True, False])
+
+
+def test_align_to_frames_2d_and_explicit_fill():
     me2d = np.ones((3, 2), dtype=np.float32)
     out = align_to_frames(me2d)
     assert out.shape == (4, 2)
-    np.testing.assert_array_equal(out[0], [0.0, 0.0])
+    assert np.isnan(out[0]).all()
+    np.testing.assert_array_equal(align_to_frames(me2d, fill=0.0)[0], [0.0, 0.0])
 
 
 # --- ROIs ---------------------------------------------------------------------

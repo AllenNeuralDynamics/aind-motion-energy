@@ -382,6 +382,12 @@ def _write_csv(
             writer.writerow([frame_index[i], keyframe_mask[i], *row])
 
 
+def _nanstat(fn: Any, values: np.ndarray) -> float:
+    """`fn` (a NaN-aware reduction) of `values`, or NaN when there are no finite values."""
+    finite = values[np.isfinite(values)]
+    return float(fn(finite)) if finite.size else float("nan")
+
+
 def _roi_metadata(source: RoiSource) -> dict[str, Any]:
     return {
         "roi_box": list(source.box) if source.box else None,
@@ -483,10 +489,11 @@ def _process_video(video: Path, args: argparse.Namespace, source: RoiSource) -> 
     me_clean = clean_trace(result.me, result.keyframe_mask, method=args.clean_method)
     stem = camera_key(video)
 
-    # Frame-align at the output edge: one value per decoded frame, frame 0 = 0.
-    me = align_to_frames(result.me, fill=0.0)
-    me_clean = align_to_frames(me_clean, fill=0.0)
-    keyframe_mask = align_to_frames(result.keyframe_mask, fill=False)
+    # Frame-align at the output edge: one value per decoded frame. Frame 0 has no
+    # predecessor, so it's NaN in the traces and False in the keyframe mask.
+    me = align_to_frames(result.me)
+    me_clean = align_to_frames(me_clean)
+    keyframe_mask = align_to_frames(result.keyframe_mask)
     first = args.start_frame or 0
     frame_index = np.arange(first, first + len(me), dtype=np.int64)
 
@@ -518,7 +525,7 @@ def _process_video(video: Path, args: argparse.Namespace, source: RoiSource) -> 
         **_roi_metadata(source),
         "output_version": OUTPUT_VERSION,
         "n_output_frames": len(me),
-        "first_frame_fill": 0.0,
+        "first_frame_fill": None,  # NaN; JSON has no NaN literal
     }
     with open(args.output / f"{stem}_me_metadata.json", "w") as f:
         json.dump(meta, f, indent=2)
@@ -527,7 +534,7 @@ def _process_video(video: Path, args: argparse.Namespace, source: RoiSource) -> 
     print(
         f"{stem}: {len(me)} frames | {len(result.roi_ids) - 1} ROIs | "
         f"{meta['n_keyframes_masked']} keyframes | "
-        f"full_frame max={full.max(initial=0):.4f} mean={full.mean() if len(full) else 0:.4f}"
+        f"full_frame max={_nanstat(np.nanmax, full):.4f} mean={_nanstat(np.nanmean, full):.4f}"
     )
     _render_extras(video, args, stem, result, (me, me_clean, keyframe_mask), source.rois)
 

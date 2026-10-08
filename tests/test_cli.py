@@ -367,7 +367,8 @@ def test_outputs_are_frame_aligned(mock_compute, monkeypatch, tmp_path):
     main()
 
     with np.load(out / "clip_motion_energy.npz") as f:
-        np.testing.assert_array_equal(f["me"][:, 0], [0.0, 5.0, 6.0, 7.0])
+        np.testing.assert_array_equal(f["me"][:, 0], [np.nan, 5.0, 6.0, 7.0])
+        assert np.isnan(f["me_clean"][0]).all()
         np.testing.assert_array_equal(f["keyframe_mask"], [False, False, True, False])
         np.testing.assert_array_equal(f["frame_index"], [10, 11, 12, 13])
     with open(out / "clip_motion_energy.csv") as f:
@@ -375,7 +376,8 @@ def test_outputs_are_frame_aligned(mock_compute, monkeypatch, tmp_path):
     assert [r[0] for r in rows[1:]] == ["10", "11", "12", "13"]
     meta = json.loads((out / "clip_me_metadata.json").read_text())
     assert meta["n_output_frames"] == 4
-    assert meta["first_frame_fill"] == 0.0
+    assert meta["first_frame_fill"] is None
+    assert rows[1][2] == "nan"
 
 
 # --- NPZ output and metadata ---------------------------------------------------
@@ -619,3 +621,33 @@ def test_unknown_viz_rois_error_before_processing(mock_compute, monkeypatch, tmp
 
     mock_compute.assert_not_called()
     assert "Snoot" in capsys.readouterr().err
+
+
+@patch("aind_motion_energy.cli.compute_motion_energy")
+def test_summary_line_ignores_nan_first_frame(mock_compute, monkeypatch, tmp_path, capsys):
+    video = tmp_path / "clip.mp4"
+    video.touch()
+    me = np.array([[2.0], [4.0]], dtype=np.float32)
+    mock_compute.return_value = _fake_compute_result(me=me)
+
+    monkeypatch.setattr(
+        sys, "argv", ["prog", "--input", str(video), "--output", str(tmp_path / "o")]
+    )
+    main()
+
+    assert "max=4.0000 mean=3.0000" in capsys.readouterr().out
+
+
+@patch("aind_motion_energy.cli.compute_motion_energy")
+def test_summary_line_with_no_diffs(mock_compute, monkeypatch, tmp_path, capsys):
+    video = tmp_path / "clip.mp4"
+    video.touch()
+    mock_compute.return_value = _fake_compute_result(me=np.zeros((0, 1), np.float32))
+
+    monkeypatch.setattr(
+        sys, "argv", ["prog", "--input", str(video), "--output", str(tmp_path / "o")]
+    )
+    main()
+
+    out = capsys.readouterr().out
+    assert "1 frames" in out and "max=nan mean=nan" in out
