@@ -233,14 +233,14 @@ def test_save_summary_plots_with_rois(tmp_path, k):
     me[:, 1] = 0.5  # a flat (dead) ROI must not break the z-score
     mask = np.zeros(30, dtype=bool)
     mask[[5, 6]] = True
-    rois = _rois(k=k)
+    rois = _rois(h=60, w=80, k=k)
 
     trace_path, map_path = save_summary_plots(
         tmp_path,
         "camC",
         me,
         me,
-        np.zeros((8, 10), np.float32),
+        np.zeros((60, 80), np.float32),
         fps=30.0,
         roi_ids=["full_frame", *rois.ids],
         keyframe_mask=mask,
