@@ -137,3 +137,15 @@ Empty masks are rejected at load time, because `reduceat` misbehaves on zero-len
   - Compare full-frame only (the 0.3.0 baseline) against 1, 10 and 100 ROIs. Also sweep the total mask area at 0.5×, 2×, 4×, 10× and 20× the frame area, to set the guard thresholds.
   - Expect 100 typical ROIs to add little over baseline, and the uint32 map to come out faster than 0.3.0.
   - Record the numbers in the design notes.
+
+## Real-session validation [as built]
+
+`behavior_800886_2025-09-11_13-52-51`: flat layout, `bottom_camera.mp4` and `side_camera_right.mp4`, 720×540 at 1000 fps, 2.63M frames each. Used 10 ROIs drawn in the annotator (polygons and boxes) and a 15 s window per camera.
+
+- **Traces:** every ROI matches a brute-force per-mask reference (max error 1e-7), and the outlines sit on the intended anatomy.
+- **Speed:** 6 ROIs cost about 8% (1040 → 955 fps), so a full camera takes about 46 min.
+- **Issues found and fixed here:**
+  - Mask files named by the annotator (`…_BottomCamera_masks.npz`) didn't match `bottom_camera.mp4`. Matching now ignores case and separators, on whole `_`-separated parts, and mask files that match no video are listed.
+  - Long ROI ids overflowed the legends and labels. Plots now drop the camera prefix all ROIs share.
+  - Per-frame rows were held as a Python list of arrays, roughly 400 MB of overhead at 2.6M frames. They now go into a preallocated buffer that grows if needed.
+- **Found in the annotator (not this repo):** `export_rois.build_mask` reads box geometry from top-level `x/y/w/h`, but the JSON stores it under `bbox`, so every box is exported as an empty mask. This library rejects empty masks with a clear error.

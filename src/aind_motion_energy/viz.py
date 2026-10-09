@@ -1,5 +1,6 @@
 """Static summary plots and scrolling motion-energy video rendering."""
 
+import os
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -48,6 +49,20 @@ def _column_ids(n_columns: int, roi_ids: Sequence[str] | None) -> list[str]:
     return [FULL_FRAME_ID] + [f"roi{i}" for i in range(1, n_columns)]
 
 
+def _short_labels(ids: Sequence[str]) -> list[str]:
+    """Display labels for ROI ids, minus the ``<camera>_`` prefix they all share.
+
+    The annotator names ROIs ``<Camera>_<name>_<type>``, which is too long to
+    fit in legends and on outlines; the camera is already in the plot title.
+    Only affects plots, never saved ids.
+    """
+    if len(ids) < 2:
+        return list(ids)
+    cut = os.path.commonprefix(list(ids)).rfind("_") + 1
+    short = [i[cut:] for i in ids]
+    return short if all(short) else list(ids)
+
+
 def _roi_color(plt: Any, roi_index: int) -> Any:
     """Colour of ROI ``roi_index`` (0-based, excluding full_frame), shared by every plot.
 
@@ -61,7 +76,7 @@ def _draw_roi_outlines(plt: Any, ax: Any, rois: RoiSet, lw: float = 1.0) -> None
     """Outline each ROI's mask on an image axis and label it at its top-left corner."""
     from matplotlib import patheffects
 
-    for i, roi_id in enumerate(rois.ids):
+    for i, roi_id in enumerate(_short_labels(rois.ids)):
         (x, y, w, h), cropped = rois.mask(i)
         # Pad so masks touching their bbox edge still get a closed contour;
         # coordinates are pixel centres, matching imshow.
@@ -122,7 +137,7 @@ def _plot_roi_heatmap(
         vmax=3,
     )
     if len(ids) <= HEATMAP_MAX_LABELS:
-        ax.set_yticks(range(len(ids)), ids, fontsize=6)
+        ax.set_yticks(range(len(ids)), _short_labels(ids), fontsize=6)
     else:
         ax.set_ylabel(f"{len(ids)} ROIs")
     # Inset colorbar, so the heatmap keeps the same width (time axis) as the trace above.
@@ -265,7 +280,7 @@ def _build_trace_figure(
     for label, trace, color in traces:
         ax_plot.plot(trace_t, trace, lw=0.7, color=color, zorder=2, label=label)
     if len(traces) > 1:
-        ax_plot.legend(fontsize=6, loc="upper left", ncol=min(len(traces), 5), frameon=False)
+        ax_plot.legend(fontsize=6, loc="upper left", ncol=min(len(traces), 3), frameon=False)
     cursor = ax_plot.axvline(float(trace_t[0]) if len(trace_t) else 0.0, lw=0.8, color="0.5")
     ax_plot.set_xlabel("Time (s)")
     ax_plot.set_ylabel("Motion energy")
@@ -330,8 +345,9 @@ def _select_traces(
         if unknown:
             raise ValueError(f"unknown viz_rois {unknown}; available: {ids}")
         chosen = [ids.index(r) for r in viz_rois]
+    labels = [FULL_FRAME_ID, *_short_labels(ids[1:])]
     return [
-        (ids[c], clean[:, c], FULL_FRAME_COLOR if c == 0 else _roi_color(plt, c - 1))
+        (labels[c], clean[:, c], FULL_FRAME_COLOR if c == 0 else _roi_color(plt, c - 1))
         for c in chosen
     ]
 

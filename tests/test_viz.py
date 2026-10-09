@@ -344,3 +344,13 @@ def test_render_with_nan_and_all_nan_traces(mock_iter, mock_open, tmp_path):
             Path("fake.mp4"), trace, fps_source=500.0, output_path=tmp_path / "v.mp4", dpi=50
         )
         assert _encoded_frame_count(captured) == 3
+
+
+def test_short_labels_strip_shared_camera_prefix():
+    from aind_motion_energy.viz import _short_labels
+
+    ids = ["SideCameraRight_snout_polygon", "SideCameraRight_paw_box"]
+    assert _short_labels(ids) == ["snout_polygon", "paw_box"]
+    assert _short_labels(["Cam_a"]) == ["Cam_a"]  # one ROI: nothing to compare against
+    assert _short_labels(["a", "b"]) == ["a", "b"]  # no shared prefix
+    assert _short_labels(["Cam_", "Cam_x"]) == ["Cam_", "Cam_x"]  # never an empty label

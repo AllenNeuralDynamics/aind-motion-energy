@@ -109,8 +109,12 @@ def compute_motion_energy(
     # nothing should be masked.
     do_mask = mask_keyframes and info["codec_name"] not in _INTRA_ONLY_CODECS
 
-    rows: list[np.ndarray] = []
-    keyframe_flags: list[bool] = []
+    # Preallocated from the probed frame count (grown if the probe was short),
+    # not a list of per-frame arrays: long 1000 fps sessions have millions of rows.
+    n_expected = min(end_frame or info["n_frames"], info["n_frames"]) - (start_frame or 0)
+    sums = np.empty((max(n_expected - 1, 1), len(roi_ids)), dtype=np.int64)
+    keyframe_flags = np.empty(len(sums), dtype=bool)
+    n_diffs = 0
     # Exact integer accumulator: 255 per diff overflows uint32 only past ~16.8M frames.
     map_accumulator = np.zeros((height, width), dtype=np.uint32)
     map_pair_count = 0
@@ -130,15 +134,16 @@ def compute_motion_energy(
         if prev_frame is not None:
             # |diff| <= 255, so the uint16 view is exact and adds cleanly to uint32.
             diff = np.abs(frame_i - prev_frame).view(np.uint16)
-            row = np.empty(len(roi_ids), dtype=np.int64)
-            row[0] = diff.sum(dtype=np.int64)
+            if n_diffs == len(sums):
+                sums, keyframe_flags = _grow(sums), _grow(keyframe_flags)
+            sums[n_diffs, 0] = diff.sum(dtype=np.int64)
             if rois is not None:
-                row[1:] = rois.reduce(diff)
-            rows.append(row)
+                sums[n_diffs, 1:] = rois.reduce(diff)
             # A diff is contaminated if either of its frames is a keyframe:
             # the diff into a keyframe and the diff out of it both pop.
             contaminated = do_mask and (is_key or prev_is_key)
-            keyframe_flags.append(contaminated)
+            keyframe_flags[n_diffs] = contaminated
+            n_diffs += 1
             if not contaminated:
                 map_accumulator += diff
                 map_pair_count += 1
@@ -146,9 +151,9 @@ def compute_motion_energy(
         prev_is_key = is_key
         frames_read += 1
 
-    sums = np.stack(rows) if rows else np.zeros((0, len(roi_ids)), dtype=np.int64)
+    sums = sums[:n_diffs]
     me = (sums / pixel_counts if normalize else sums).astype(np.float32)
-    keyframe_mask = np.array(keyframe_flags, dtype=bool)
+    keyframe_mask = keyframe_flags[:n_diffs].copy()
     avg_map = (map_accumulator / max(map_pair_count, 1)).astype(np.float32)
 
     metadata = {
@@ -178,6 +183,13 @@ def compute_motion_energy(
         avg_map=avg_map,
         metadata=metadata,
     )
+
+
+def _grow(arr: np.ndarray) -> np.ndarray:
+    """Return a copy of `arr` with its first axis doubled (new rows uninitialized)."""
+    out = np.empty((2 * len(arr), *arr.shape[1:]), dtype=arr.dtype)
+    out[: len(arr)] = arr
+    return out
 
 
 def clean_trace(

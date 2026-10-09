@@ -651,3 +651,36 @@ def test_summary_line_with_no_diffs(mock_compute, monkeypatch, tmp_path, capsys)
 
     out = capsys.readouterr().out
     assert "1 frames" in out and "max=nan mean=nan" in out
+
+
+def test_assign_mask_files_ignores_case_and_separators(tmp_path):
+    from aind_motion_energy.cli import assign_mask_files
+
+    names = (
+        "behavior_1_2025-09-11_13-52-51_BottomCamera_masks.npz",
+        "behavior_1_2025-09-11_13-52-51_SideCameraRight_masks.npz",
+    )
+    for name in names:
+        (tmp_path / name).touch()
+
+    got = assign_mask_files(tmp_path, ["bottom_camera", "side_camera_right", "camera", "right"])
+
+    # Whole-part matching only: "camera" and "right" don't steal these files.
+    assert got == {
+        "bottom_camera": [tmp_path / names[0]],
+        "side_camera_right": [tmp_path / names[1]],
+    }
+
+
+@patch("aind_motion_energy.cli.get_video_info", return_value=_info())
+@patch("aind_motion_energy.cli.compute_motion_energy")
+def test_unmatched_mask_files_are_reported(mock_compute, mock_info, monkeypatch, tmp_path, capsys):
+    input_dir, masks_dir = _nested_session(tmp_path, cams=("SideCamera",))
+    _write_masks(masks_dir / "s_TopCamera_masks.npz")
+    mock_compute.return_value = _fake_compute_result()
+
+    argv = ["prog", "--input", str(input_dir), "--output", str(tmp_path / "out")]
+    monkeypatch.setattr(sys, "argv", argv + ["--roi-masks", str(masks_dir)])
+    main()
+
+    assert "s_TopCamera_masks.npz matches no video's camera name" in capsys.readouterr().out

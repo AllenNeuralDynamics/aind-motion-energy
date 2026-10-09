@@ -230,13 +230,22 @@ class RoiSource:
     box: tuple[int, int, int, int] | None = None
 
 
+def _name_key(name: str) -> str:
+    """Compare camera names ignoring case and separators: ``BottomCamera`` == ``bottom_camera``."""
+    return "".join(ch for ch in name.lower() if ch.isalnum())
+
+
 def assign_mask_files(mask_dir: Path, keys: list[str]) -> dict[str, list[Path]]:
     """Match ROI annotator mask files to camera keys by filename.
 
-    A file belongs to camera ``key`` when it is named ``<key>_masks.npz`` or
-    ``<anything>_<key>_masks.npz`` (the annotator writes
-    ``<session>_<camera>_masks.npz``). When several keys fit — ``camera`` and
-    ``side_camera`` both fit ``s_side_camera_masks.npz`` — the longest wins.
+    The annotator writes ``<session>_<camera>_masks.npz``. A file belongs to
+    camera ``key`` when its trailing ``_``-separated parts spell ``key``,
+    ignoring case and separators — so ``s_BottomCamera_masks.npz`` and
+    ``s_bottom_camera_masks.npz`` both match ``bottom_camera`` (the annotator
+    names cameras ``BottomCamera`` where older videos are ``bottom_camera.mp4``).
+    Only whole parts count: ``camera`` does not match ``s_BottomCamera``. When
+    several keys fit — ``camera`` and ``side_camera`` both fit
+    ``s_side_camera_masks.npz`` — the longest wins.
 
     Parameters
     ----------
@@ -252,11 +261,28 @@ def assign_mask_files(mask_dir: Path, keys: list[str]) -> dict[str, list[Path]]:
     """
     by_key: dict[str, list[Path]] = {}
     for path in sorted(mask_dir.glob(f"*{MASKS_SUFFIX}")):
-        stem = path.name[: -len(MASKS_SUFFIX)]
-        fits = [k for k in keys if stem == k or stem.endswith(f"_{k}")]
+        parts = path.name[: -len(MASKS_SUFFIX)].split("_")
+        tails = {_name_key("".join(parts[i:])) for i in range(len(parts))}
+        fits = [k for k in keys if _name_key(k) in tails]
         if fits:
             by_key.setdefault(max(fits, key=len), []).append(path)
     return by_key
+
+
+def _mask_files_by_key(videos: list[Path], masks_path: Path) -> dict[str, list[Path]]:
+    """Camera key -> mask files for ``--roi-masks`` (a file for one video, or a directory)."""
+    if masks_path.is_file():
+        if len(videos) != 1:
+            raise ValueError(
+                "--roi-masks is a single file but --input has several videos; "
+                "pass a directory of '*_<camera>_masks.npz' files instead"
+            )
+        return {camera_key(videos[0]): [masks_path]}
+    files = assign_mask_files(masks_path, [camera_key(v) for v in videos])
+    matched = {p for paths in files.values() for p in paths}
+    for path in sorted(set(masks_path.glob(f"*{MASKS_SUFFIX}")) - matched):
+        print(f"[warn] {path.name} matches no video's camera name; it is not used")
+    return files
 
 
 def resolve_rois(
@@ -298,16 +324,7 @@ def resolve_rois(
     if masks_path is None:
         return sources
 
-    if masks_path.is_file():
-        if len(videos) != 1:
-            raise ValueError(
-                "--roi-masks is a single file but --input has several videos; "
-                "pass a directory of '*_<camera>_masks.npz' files instead"
-            )
-        files = {camera_key(videos[0]): [masks_path]}
-    else:
-        files = assign_mask_files(masks_path, [camera_key(v) for v in videos])
-
+    files = _mask_files_by_key(videos, masks_path)
     for video in videos:
         key = camera_key(video)
         matches = files.get(key, [])

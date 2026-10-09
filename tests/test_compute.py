@@ -325,3 +325,20 @@ def test_clean_trace_2d_nan_blanks_whole_rows():
     me = np.ones((3, 2), dtype=np.float32)
     out = clean_trace(me, np.array([False, True, False]), method="nan")
     assert np.isnan(out[1]).all() and not np.isnan(out[[0, 2]]).any()
+
+
+@patch("aind_motion_energy.compute.iter_luma_frames")
+@patch("aind_motion_energy.compute.get_video_info")
+def test_buffers_grow_when_probe_undercounts_frames(mock_info, mock_iter):
+    # ffprobe frame counts can be wrong; more decoded frames than probed must still fit.
+    mock_info.return_value = _info(width=2, height=2, n_frames=2)
+    fills = list(range(0, 70, 10))  # 7 frames -> 6 diffs of 10
+    mock_iter.return_value = iter(
+        _frames(fills, keys=[False, False, False, True] + [False] * 3, height=2, width=2)
+    )
+    rois = RoiSet.from_box((0, 0, 1, 1), (2, 2))
+
+    res = compute_motion_energy(Path("fake.mp4"), rois=rois, normalize=False)
+
+    np.testing.assert_allclose(res.me, [[40.0, 10.0]] * 6)
+    np.testing.assert_array_equal(res.keyframe_mask, [False, False, True, True, False, False])
