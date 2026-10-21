@@ -103,7 +103,8 @@ def test_metadata_fields(mock_info, mock_iter):
     _, _, _, meta = _legacy(compute_motion_energy(Path("fake.mp4"), normalize=True))
 
     assert meta["n_frames_decoded"] == 3
-    assert meta["n_me_frames"] == 2
+    assert meta["n_diffs"] == 2
+    assert "n_me_frames" not in meta
     assert meta["fps"] == 60.0
     assert meta["codec_name"] == "h264"
     assert meta["normalized"] is True

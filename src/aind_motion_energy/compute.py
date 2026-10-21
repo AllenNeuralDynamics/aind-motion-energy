@@ -159,7 +159,10 @@ def compute_motion_energy(
     metadata = {
         "video_path": str(video_path),
         "n_frames_decoded": frames_read,
-        "n_me_frames": len(me),
+        # Was "n_me_frames" before 0.4.0. Renamed so readers that pad when
+        # n_me_frames == n_frames_decoded - 1 fail instead of padding the
+        # already frame-aligned saved traces a second time.
+        "n_diffs": len(me),
         "n_keyframes_masked": int(keyframe_mask.sum()),
         "fps": info["fps"],
         "codec_name": info["codec_name"],

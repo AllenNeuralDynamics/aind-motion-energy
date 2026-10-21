@@ -377,6 +377,8 @@ def test_outputs_are_frame_aligned(mock_compute, monkeypatch, tmp_path):
     meta = json.loads((out / "clip_me_metadata.json").read_text())
     assert meta["n_output_frames"] == 4
     assert meta["first_frame_fill"] is None
+    # Old readers padded when n_me_frames == n_frames_decoded - 1; the key is gone so they fail.
+    assert "n_me_frames" not in meta
     assert rows[1][2] == "nan"
 
 
