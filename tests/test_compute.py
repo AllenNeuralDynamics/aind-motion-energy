@@ -343,3 +343,19 @@ def test_buffers_grow_when_probe_undercounts_frames(mock_info, mock_iter):
 
     np.testing.assert_allclose(res.me, [[40.0, 10.0]] * 6)
     np.testing.assert_array_equal(res.keyframe_mask, [False, False, True, True, False, False])
+
+
+@pytest.mark.parametrize(
+    "start,end,match",
+    [
+        (-1, None, "start frame must be >= 0"),
+        (10, 10, "must be after"),
+        (10, 5, "must be after"),
+        (None, 0, "must be after"),
+    ],
+)
+def test_invalid_frame_range_raises_before_probing(start, end, match):
+    with patch("aind_motion_energy.compute.get_video_info") as mock_info:
+        with pytest.raises(ValueError, match=match):
+            compute_motion_energy(Path("fake.mp4"), start_frame=start, end_frame=end)
+    mock_info.assert_not_called()

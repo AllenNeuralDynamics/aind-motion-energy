@@ -12,7 +12,13 @@ from typing import Any
 
 import numpy as np
 
-from .compute import MotionEnergyResult, align_to_frames, clean_trace, compute_motion_energy
+from .compute import (
+    MotionEnergyResult,
+    align_to_frames,
+    check_frame_range,
+    clean_trace,
+    compute_motion_energy,
+)
 from .io import get_video_info
 from .rois import FULL_FRAME_ID, RoiSet, load_roi_masks
 
@@ -576,6 +582,7 @@ def main() -> None:
     roi_box = tuple(args.roi) if args.roi else None
 
     try:
+        check_frame_range(args.start_frame, args.end_frame)
         videos = discover_videos(args.input, set(args.extensions))
         if not videos:
             print(f"No videos found in {args.input}")

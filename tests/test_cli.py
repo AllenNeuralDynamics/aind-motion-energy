@@ -686,3 +686,17 @@ def test_unmatched_mask_files_are_reported(mock_compute, mock_info, monkeypatch,
     main()
 
     assert "s_TopCamera_masks.npz matches no video's camera name" in capsys.readouterr().out
+
+
+@patch("aind_motion_energy.cli.compute_motion_energy")
+def test_invalid_frame_range_errors_before_processing(mock_compute, monkeypatch, tmp_path, capsys):
+    video = tmp_path / "clip.mp4"
+    video.touch()
+
+    argv = ["prog", "--input", str(video), "--output", str(tmp_path / "out")]
+    monkeypatch.setattr(sys, "argv", argv + ["--start-frame", "500", "--end-frame", "100"])
+    with pytest.raises(SystemExit):
+        main()
+
+    mock_compute.assert_not_called()
+    assert "end frame (100) must be after start frame (500)" in capsys.readouterr().err

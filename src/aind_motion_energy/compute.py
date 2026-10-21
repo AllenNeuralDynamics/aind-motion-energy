@@ -11,6 +11,27 @@ from .io import _INTRA_ONLY_CODECS, get_video_info, iter_luma_frames
 from .rois import FULL_FRAME_ID, RoiSet
 
 
+def check_frame_range(start_frame: int | None, end_frame: int | None) -> None:
+    """Raise if ``[start_frame, end_frame)`` can't select any frames.
+
+    Parameters
+    ----------
+    start_frame : int or None
+        First frame, inclusive. None means 0.
+    end_frame : int or None
+        Last frame, exclusive. None means the end of the video.
+
+    Raises
+    ------
+    ValueError
+        If either bound is negative, or `end_frame` is not after `start_frame`.
+    """
+    if start_frame is not None and start_frame < 0:
+        raise ValueError(f"start frame must be >= 0 (got {start_frame})")
+    if end_frame is not None and end_frame <= (start_frame or 0):
+        raise ValueError(f"end frame ({end_frame}) must be after start frame ({start_frame or 0})")
+
+
 @dataclass(frozen=True, eq=False)
 class MotionEnergyResult:
     """Motion energy for one video: a whole-frame trace plus one trace per ROI.
@@ -91,8 +112,10 @@ def compute_motion_energy(
     Raises
     ------
     ValueError
-        If `rois` were drawn on a frame of a different size than the video.
+        If the frame range is invalid (see `check_frame_range`), or `rois`
+        were drawn on a frame of a different size than the video.
     """
+    check_frame_range(start_frame, end_frame)
     video_path = Path(video_path)
     info = get_video_info(video_path)
     height, width = info["height"], info["width"]

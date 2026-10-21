@@ -43,7 +43,7 @@ uv run aind-motion-energy --input data/my_video.mp4 --output results/ --summary-
 | `--no-normalize` | off | Skip per-pixel normalization (output raw summed differences instead of dividing each trace by its region's pixel count). |
 | `--csv` | off | Also write a wide per-frame CSV. The NPZ is always written. |
 | `--start-frame` | `0` | First frame to process (inclusive, 0-indexed). |
-| `--end-frame` | end of video | Last frame to process (exclusive). |
+| `--end-frame` | end of video | Last frame to process (exclusive). Must be after `--start-frame`; an invalid range is refused before any video is processed. |
 | `--no-mask-keyframes` | off | Disable detection of H.264/HEVC keyframe-contaminated diffs. |
 | `--clean-method {interpolate,nan}` | `interpolate` | How the cleaned trace handles keyframe-contaminated diffs. |
 | `--summary-plots` | off | Also save two static QC PNGs per video (full-frame trace + ROI heatmap; average motion map with ROI outlines). Requires the `[viz]` extra. |
