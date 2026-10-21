@@ -33,7 +33,7 @@ def test_renders_one_output_frame_per_decoded_frame(mock_iter, mock_open, tmp_pa
     mock_iter.return_value = iter(_frames(5))
     captured = []
     mock_open.return_value = _fake_container(captured)
-    trace = np.arange(4, dtype=np.float32)  # N-1 entries
+    trace = np.arange(5, dtype=np.float32)  # frame-aligned: one per frame
 
     out = render_motion_energy_video(
         Path("fake.mp4"),
@@ -212,3 +212,145 @@ def test_save_summary_plots_accepts_str_output_dir(tmp_path):
 
     assert trace_path.parent == tmp_path
     assert map_path.parent == tmp_path
+
+
+# --- multi-ROI --------------------------------------------------------------
+
+
+def _rois(h=8, w=10, k=2):
+    rois = {}
+    for i in range(k):
+        mask = np.zeros((h, w), bool)
+        mask[i % h, : 2 + i % (w - 2)] = True
+        rois[f"r{i}"] = mask
+    return rois
+
+
+@pytest.mark.parametrize("k", [2, 50])
+def test_save_summary_plots_with_rois(tmp_path, k):
+    rng = np.random.default_rng(0)
+    me = rng.random((30, 1 + k)).astype(np.float32)
+    me[:, 1] = 0.5  # a flat (dead) ROI must not break the z-score
+    mask = np.zeros(30, dtype=bool)
+    mask[[5, 6]] = True
+    rois = _rois(h=60, w=80, k=k)
+
+    trace_path, map_path = save_summary_plots(
+        tmp_path,
+        "camC",
+        me,
+        me,
+        np.zeros((60, 80), np.float32),
+        fps=30.0,
+        roi_ids=["full_frame", *rois],
+        keyframe_mask=mask,
+        rois=rois,
+        dpi=50,
+    )
+
+    assert trace_path.stat().st_size > 0 and map_path.stat().st_size > 0
+
+
+def test_roi_ids_length_must_match_columns(tmp_path):
+    me = np.zeros((3, 2), np.float32)
+    with pytest.raises(ValueError, match="2 trace columns"):
+        save_summary_plots(tmp_path, "x", me, me, np.zeros((2, 2)), fps=1.0, roi_ids=["a"])
+
+
+@patch("aind_motion_energy.viz.av.open")
+@patch("aind_motion_energy.viz.iter_luma_frames")
+def test_render_with_rois_and_selection(mock_iter, mock_open, tmp_path):
+    mock_iter.return_value = iter(_frames(4))
+    captured = []
+    mock_open.return_value = _fake_container(captured)
+    rois = _rois(k=3)
+    trace = np.random.default_rng(0).random((4, 4)).astype(np.float32)
+
+    render_motion_energy_video(
+        Path("fake.mp4"),
+        trace,
+        fps_source=500.0,
+        output_path=tmp_path / "viz.mp4",
+        raw_trace=trace,
+        roi_ids=["full_frame", *rois],
+        rois=rois,
+        viz_rois=["r2", "r0"],  # no full_frame -> raw line dropped
+        dpi=50,
+    )
+
+    assert _encoded_frame_count(captured) == 4
+
+
+@patch("aind_motion_energy.viz.av.open")
+@patch("aind_motion_energy.viz.iter_luma_frames")
+def test_render_default_selection_with_unnamed_columns(mock_iter, mock_open, tmp_path):
+    mock_iter.return_value = iter(_frames(3))
+    captured = []
+    mock_open.return_value = _fake_container(captured)
+
+    render_motion_energy_video(
+        Path("fake.mp4"),
+        np.zeros((3, 7), np.float32),
+        fps_source=500.0,
+        output_path=tmp_path / "viz.mp4",
+        dpi=50,
+    )
+
+    assert _encoded_frame_count(captured) == 3
+
+
+def test_render_unknown_viz_rois_raises(tmp_path):
+    with pytest.raises(ValueError, match="unknown viz_rois"):
+        render_motion_energy_video(
+            Path("fake.mp4"),
+            np.zeros((3, 2), np.float32),
+            fps_source=500.0,
+            output_path=tmp_path / "viz.mp4",
+            viz_rois=["nope"],
+        )
+
+
+def test_zscore_binned_ignores_nan_and_keeps_empty_bins_blank():
+    from aind_motion_energy.viz import _zscore_binned
+
+    values = np.array([[np.nan, np.nan], [1.0, np.nan], [3.0, np.nan]], dtype=np.float32)
+    z = _zscore_binned(values, max_bins=3)
+
+    assert np.isnan(z[0, 0])  # bin with no finite values stays blank
+    np.testing.assert_allclose(z[1:, 0], [-1.0, 1.0])  # NaN didn't poison the column
+    assert np.isnan(z[:, 1]).all()  # all-NaN column stays blank, no crash
+
+
+def test_save_summary_plots_with_nan_first_frame(tmp_path):
+    me = np.random.default_rng(0).random((20, 3)).astype(np.float32)
+    me[0] = np.nan
+    rois = _rois(h=30, w=40, k=2)
+
+    trace_path, _ = save_summary_plots(
+        tmp_path, "nan", me, me, np.zeros((30, 40), np.float32), fps=10.0, rois=rois, dpi=50
+    )
+
+    assert trace_path.stat().st_size > 0
+
+
+@patch("aind_motion_energy.viz.av.open")
+@patch("aind_motion_energy.viz.iter_luma_frames")
+def test_render_with_nan_and_all_nan_traces(mock_iter, mock_open, tmp_path):
+    for trace in (np.array([np.nan, 1.0, 2.0], np.float32), np.full(3, np.nan, np.float32)):
+        mock_iter.return_value = iter(_frames(3))
+        captured = []
+        mock_open.return_value = _fake_container(captured)
+        render_motion_energy_video(
+            Path("fake.mp4"), trace, fps_source=500.0, output_path=tmp_path / "v.mp4", dpi=50
+        )
+        assert _encoded_frame_count(captured) == 3
+
+
+def test_short_labels_strip_shared_camera_prefix():
+    from aind_motion_energy.viz import _short_labels
+
+    ids = ["SideCameraRight_snout_polygon", "SideCameraRight_paw_box"]
+    assert _short_labels(ids) == ["snout_polygon", "paw_box"]
+    assert _short_labels(["Cam_a"]) == ["Cam_a"]  # one ROI: nothing to compare against
+    assert _short_labels(["a", "b"]) == ["a", "b"]  # no shared prefix
+    assert _short_labels(["Cam_", "Cam_x"]) == ["Cam_", "Cam_x"]  # never an empty label
