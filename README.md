@@ -38,16 +38,18 @@ uv run aind-motion-energy --input data/my_video.mp4 --output results/ --summary-
 | `--input` | *(required)* | Video file or directory of videos. |
 | `--extensions EXT [EXT ...]` | all video types | Only process these extensions when `--input` is a directory (e.g. `--extensions .mp4`). Case-insensitive; leading dot optional. |
 | `--output` | `results/` | Output directory. |
-| `--roi X Y W H` | full frame | Region of interest in pixels. |
-| `--no-normalize` | off | Skip per-pixel normalization (output raw summed differences instead of dividing by pixel count). |
-| `--format {npy,csv,both}` | `npy` | Output format for the motion-energy trace. |
+| `--roi X Y W H` | none | One rectangular ROI in pixels, saved as ROI `roi`. Mutually exclusive with `--roi-masks`. |
+| `--roi-masks PATH` | none | ROI annotator mask files: a directory of `*_<camera>_masks.npz` files (matched to each video by camera name), or one masks file when `--input` is a single video. See [ROIs](#rois). |
+| `--no-normalize` | off | Skip per-pixel normalization (output raw summed differences instead of dividing each trace by its region's pixel count). |
+| `--csv` | off | Also write a wide per-frame CSV. The NPZ is always written. |
 | `--start-frame` | `0` | First frame to process (inclusive, 0-indexed). |
-| `--end-frame` | end of video | Last frame to process (exclusive). |
+| `--end-frame` | end of video | Last frame to process (exclusive). Must be after `--start-frame`; an invalid range is refused before any video is processed. |
 | `--no-mask-keyframes` | off | Disable detection of H.264/HEVC keyframe-contaminated diffs. |
 | `--clean-method {interpolate,nan}` | `interpolate` | How the cleaned trace handles keyframe-contaminated diffs. |
-| `--summary-plots` | off | Also save two static PNG summaries per video (motion-energy timeseries + average motion map). Requires the `[viz]` extra. |
+| `--summary-plots` | off | Also save two static QC PNGs per video (full-frame trace + ROI heatmap; average motion map with ROI outlines). Requires the `[viz]` extra. |
 | `--visualize` | off | Also render an MP4 of the footage with a synced, scrolling motion-energy plot. Requires the `[viz]` extra. |
 | `--viz-fps` | `60` | Playback fps of the `--visualize` video. |
+| `--viz-rois ID [ID ...]` | `full_frame` + first 4 ROIs | Which traces scroll in the `--visualize` video. |
 | `--viz-window-seconds` | `3.0` | Width of the scrolling plot window in seconds, for `--visualize`. |
 | `--viz-stride` | `1` | Render every Nth frame in `--visualize` (`1` = lossless; higher values trade temporal resolution for render time / file size). |
 
@@ -57,15 +59,66 @@ For each processed video, files are written to `--output` under a shared name st
 
 | File | Written when | Contents |
 |---|---|---|
-| `{stem}_motion_energy.npy` | always | Raw motion-energy trace (`float32`, one value per frame-to-frame diff). |
-| `{stem}_motion_energy_clean.npy` | always | Cleaned trace with keyframe-contaminated diffs handled per `--clean-method`. |
-| `{stem}_keyframe_mask.npy` | always | Bool mask flagging which diffs were keyframe-contaminated. |
-| `{stem}_motion_energy_map.npy` | always | Per-pixel average absolute frame difference, shape `(H, W)`. |
-| `{stem}_me_metadata.json` | always | Video properties and processing parameters (fps, codec, dimensions, ROI, frame range, etc.). |
-| `{stem}_motion_energy.csv` | `--format csv` or `both` | Per-frame `frame_index, motion_energy, motion_energy_clean, is_keyframe`. |
-| `{stem}_motion_energy.png` | `--summary-plots` | Motion-energy timeseries plot. |
-| `{stem}_motion_energy_map.png` | `--summary-plots` | Heatmap of `{stem}_motion_energy_map.npy`. |
-| `{stem}_motion_energy.mp4` | `--visualize` | Rendered video with a synced, scrolling motion-energy plot. |
+| `{stem}_motion_energy.npz` | always | All numeric outputs (below). |
+| `{stem}_me_metadata.json` | always | Video properties and processing parameters (fps, codec, dimensions, number of ROIs, frame range, mask file path, `output_version`). |
+| `{stem}_roi_masks.npz` | `--roi-masks` | Byte-for-byte copy of the input masks, for provenance. |
+| `{stem}_motion_energy.csv` | `--csv` | One row per frame: `frame_index, is_keyframe`, then `<id>, <id>_clean` for `full_frame` and each ROI. |
+| `{stem}_motion_energy.png` | `--summary-plots` | QC figure: full-frame trace (raw under clean, keyframes ticked) and, with ROIs, an ROI × time heatmap with each ROI z-scored. |
+| `{stem}_motion_energy_map.png` | `--summary-plots` | Average motion map with ROI outlines. |
+| `{stem}_motion_energy.mp4` | `--visualize` | Rendered video with ROI outlines and synced, scrolling traces. |
+
+`{stem}_motion_energy.npz` holds (`T` = frames, `K` = ROIs):
+
+| Array | Shape, dtype | Contents |
+|---|---|---|
+| `me` | `(T, 1+K)` float32 | Raw motion energy. Column 0 is the whole frame (`full_frame`); columns follow `roi_ids`. |
+| `me_clean` | `(T, 1+K)` float32 | `me` with keyframe-contaminated frames handled per `--clean-method`. |
+| `keyframe_mask` | `(T,)` bool | Frames whose diff was keyframe-contaminated (shared by every column). |
+| `first_frame` | scalar int64 | Video frame number of row 0; row `i` is frame `first_frame + i`. |
+| `roi_ids` | `(1+K,)` str | Column names, starting with `full_frame`. |
+| `pixel_counts` | `(1+K,)` int64 | Pixels in each region (the normalization divisor). |
+| `avg_map` | `(H, W)` float32 | Whole-frame mean absolute difference per pixel, excluding keyframe-contaminated diffs. |
+
+```python
+import numpy as np
+
+with np.load("results/BottomCamera_motion_energy.npz") as f:
+    me = f["me_clean"]
+    ids = f["roi_ids"].tolist()
+snout = me[:, ids.index("BottomCamera_Snout_box")]
+```
+
+Runs without ROIs use the same layout with `K = 0`. The file is a standard uncompressed NPZ (a ZIP of `.npy` files), readable without `allow_pickle`.
+
+### Frame alignment
+
+Saved traces have one value per decoded frame. Each frame-to-frame diff `|f[i] - f[i-1]|` is assigned to the later frame `i`, and the first frame (which has no predecessor) is **NaN** (`False` in the keyframe mask). Its motion energy is undefined rather than zero, so it can't be mistaken for a still frame. Use NaN-aware functions (`np.nanmean`, `np.nanstd`, `pandas` defaults) or drop row 0 before analysis. Index `i` of every output therefore lines up with video frame `start_frame + i` (`first_frame` in the NPZ; a `frame_index` column in the CSV), matching frame timestamps and other per-frame data. `compute_motion_energy` returns the same frame-aligned arrays in Python.
+
+## ROIs
+
+ROIs of any shape are passed in as **binary masks** — rectangles, polygons and compound shapes alike. Draw them in the ROI annotator, which exports one `{session}_{camera}_masks.npz` per camera containing `masks` (`(H, W, K)`, 0/1) and `roi_ids` (`(K,)`). Masks must match the video's frame size.
+
+```bash
+uv run aind-motion-energy --input /data/session --roi-masks /data/session/rois --summary-plots
+```
+
+- **Matching.** With a directory, each video uses the file named `<camera>_masks.npz` or `<anything>_<camera>_masks.npz`, where `<camera>` is the video's `{stem}` (see below), compared ignoring case and separators. So the annotator's `…_BottomCamera_masks.npz` matches `bottom_camera.mp4`. Only whole `_`-separated parts count, and if several cameras fit one file name the longest wins. A camera with no file gets the whole-frame trace only, and mask files that match no video are listed, both as warnings; a camera matching several files is an error.
+- **Checked up front.** Every video's masks are loaded and checked against its frame size before any video is processed.
+- **Speed.** Each frame is decoded and differenced once; all ROIs are summed from that one diff in a single vectorized call, so cost grows with the total number of masked pixels, not the number of ROIs. On the 720×540 sample clip, 100 ROIs of ~3,000 px each run at ~55% of whole-frame-only throughput.
+
+From Python:
+
+```python
+from aind_motion_energy import clean_trace, compute_motion_energy, load_roi_masks
+
+rois = load_roi_masks("rois/session_BottomCamera_masks.npz")  # {name: (H, W) bool mask}
+result = compute_motion_energy("BottomCamera/video.mp4", rois=rois)
+me_clean = clean_trace(result.me, result.keyframe_mask)  # (N, 1+K), row 0 = NaN
+snout = me_clean[:, result.roi_ids.index("BottomCamera_snout_polygon")]
+```
+
+ROIs are a plain `dict` of name → boolean mask, so any mask works, e.g. `{"paw": my_mask}`.
+```
 
 ### Camera-keying heuristic
 
