@@ -519,7 +519,8 @@ def _process_video(video: Path, args: argparse.Namespace, source: RoiSource) -> 
         me=me,
         me_clean=me_clean,
         keyframe_mask=keyframe_mask,
-        frame_index=frame_index,
+        # One number, not a per-row array: row i is video frame first_frame + i.
+        first_frame=np.array(first, dtype=np.int64),
         roi_ids=np.array(result.roi_ids, dtype=str),
         pixel_counts=result.pixel_counts,
         roi_bboxes=result.roi_bboxes,

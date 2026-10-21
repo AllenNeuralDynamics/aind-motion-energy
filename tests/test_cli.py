@@ -370,7 +370,7 @@ def test_outputs_are_frame_aligned(mock_compute, monkeypatch, tmp_path):
         np.testing.assert_array_equal(f["me"][:, 0], [np.nan, 5.0, 6.0, 7.0])
         assert np.isnan(f["me_clean"][0]).all()
         np.testing.assert_array_equal(f["keyframe_mask"], [False, False, True, False])
-        np.testing.assert_array_equal(f["frame_index"], [10, 11, 12, 13])
+        assert f["first_frame"] == 10 and f["first_frame"].shape == ()
     with open(out / "clip_motion_energy.csv") as f:
         rows = list(csv.reader(f))
     assert [r[0] for r in rows[1:]] == ["10", "11", "12", "13"]
@@ -400,7 +400,7 @@ def test_npz_contents_and_metadata_without_rois(mock_compute, monkeypatch, tmp_p
             "me",
             "me_clean",
             "keyframe_mask",
-            "frame_index",
+            "first_frame",
             "roi_ids",
             "pixel_counts",
             "roi_bboxes",

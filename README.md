@@ -74,7 +74,7 @@ For each processed video, files are written to `--output` under a shared name st
 | `me` | `(T, 1+K)` float32 | Raw motion energy. Column 0 is the whole frame (`full_frame`); columns follow `roi_ids`. |
 | `me_clean` | `(T, 1+K)` float32 | `me` with keyframe-contaminated frames handled per `--clean-method`. |
 | `keyframe_mask` | `(T,)` bool | Frames whose diff was keyframe-contaminated (shared by every column). |
-| `frame_index` | `(T,)` int64 | Video frame number of each row. |
+| `first_frame` | scalar int64 | Video frame number of row 0; row `i` is frame `first_frame + i`. |
 | `roi_ids` | `(1+K,)` str | Column names, starting with `full_frame`. |
 | `pixel_counts` | `(1+K,)` int64 | Pixels in each region (the normalization divisor). |
 | `roi_bboxes` | `(1+K, 4)` int32 | Each region's `(x, y, w, h)` bounding box. |
@@ -93,7 +93,7 @@ Runs without ROIs use the same layout with `K = 0`. The file is a standard uncom
 
 ### Frame alignment
 
-Saved traces have one value per decoded frame. Each frame-to-frame diff `|f[i] - f[i-1]|` is assigned to the later frame `i`, and the first frame (which has no predecessor) is **NaN** (`False` in the keyframe mask; the metadata's `first_frame_fill` is `null`). Its motion energy is undefined rather than zero, so it can't be mistaken for a still frame. Use NaN-aware functions (`np.nanmean`, `np.nanstd`, `pandas` defaults) or drop row 0 before analysis. Index `i` of every output therefore lines up with video frame `start_frame + i` (also stored as `frame_index`), matching frame timestamps and other per-frame data. The library function `compute_motion_energy` still returns the raw per-diff arrays (length `N - 1`); `align_to_frames` performs the padding.
+Saved traces have one value per decoded frame. Each frame-to-frame diff `|f[i] - f[i-1]|` is assigned to the later frame `i`, and the first frame (which has no predecessor) is **NaN** (`False` in the keyframe mask; the metadata's `first_frame_fill` is `null`). Its motion energy is undefined rather than zero, so it can't be mistaken for a still frame. Use NaN-aware functions (`np.nanmean`, `np.nanstd`, `pandas` defaults) or drop row 0 before analysis. Index `i` of every output therefore lines up with video frame `start_frame + i` (`first_frame` in the NPZ; a `frame_index` column in the CSV), matching frame timestamps and other per-frame data. The library function `compute_motion_energy` still returns the raw per-diff arrays (length `N - 1`); `align_to_frames` performs the padding.
 
 ## ROIs
 
