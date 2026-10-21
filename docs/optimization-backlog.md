@@ -5,7 +5,7 @@ for *why* decisions; this file is *what's left to try*.
 
 ## Faster multi-ROI reduction
 
-The ROI kernel (`RoiSet.reduce`) costs ~2 ns per masked pixel per frame; 100
+The ROI reduction in `compute_motion_energy` costs ~2 ns per masked pixel per frame; 100
 ROIs of 3k px cut end-to-end throughput to ~55% of full-frame-only on the
 sample clip. Candidates, each measured on 720×540 / 100 ROIs / 300k px:
 

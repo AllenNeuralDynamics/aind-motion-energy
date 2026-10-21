@@ -151,3 +151,16 @@ Empty masks are rejected at load time, because `reduceat` misbehaves on zero-len
 - **Found in the annotator (not this repo):** `export_rois.build_mask` reads box geometry from top-level `x/y/w/h`, but the JSON stores it under `bbox`, so every box is exported as an empty mask. This library rejects empty masks with a clear error.
 
 - **[as built] `frame_index` → `first_frame`.** The NPZ stores the starting frame number as one scalar instead of a per-row int64 array. Row i is frame `first_frame + i`. The array cost 21 MB per camera on a 2.6M-frame session, more than both full-frame traces together, and only repeated the row number in whole-video runs. The CSV keeps its `frame_index` column.
+
+## Simplification pass before merge [as built]
+
+Removed about 250 lines of library code without losing ROI features:
+
+- `RoiSet` class → plain `dict` of name → bool mask.
+- No bounding boxes.
+- No size guards. The uint32/uint64 switch became a refusal of frames over 16.8 megapixels.
+- `compute_motion_energy` returns frame-aligned traces, so `align_to_frames`, `n_diffs`, `n_output_frames` and `first_frame_fill` are gone.
+- Outlines are drawn from full-size masks.
+- No SHA-256; the copied masks file is the provenance.
+
+The ROI heatmap and `--viz-rois` were kept.

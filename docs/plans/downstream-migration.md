@@ -13,22 +13,21 @@ against each repo's state on 2026-10-21.
   (length N, row i = frame i, row 0 = NaN). 0.3.0 saved N−1 values, and readers
   added the leading NaN themselves. **Readers must stop padding**, or every
   trace shifts one frame late.
-- The metadata key `n_me_frames` is now `n_diffs` (still N−1). The rename is
-  deliberate: code that pads when `n_me_frames == n_frames_decoded - 1` now
-  fails with a `KeyError` instead of silently padding twice. Use
-  `n_output_frames`, which equals `n_frames_decoded` for a whole-video run.
+- The metadata key `n_me_frames` is removed on purpose: code that pads when
+  `n_me_frames == n_frames_decoded - 1` now fails with a `KeyError` instead of
+  silently padding twice. Trace length is `n_frames_decoded`.
 - `--format {npy,csv,both}` is replaced by a `--csv` flag (the NPZ is always
   written). Callers passing `--format csv` or `--format both` must switch to `--csv`.
-- The Python API changed: `compute_motion_energy` returns a `MotionEnergyResult`
+- The Python API changed: ROIs are a `dict` of name → bool mask, and `compute_motion_energy` returns a frame-aligned `MotionEnergyResult`
   (not a 4-tuple), and takes `rois=` instead of `roi=`.
 
 ## kinematics_analysis
 
 | File | Change |
 |---|---|
-| `code/build_me_table.py` | Download `<source>_motion_energy.npz` instead of `_motion_energy_clean.npy`; take `me_clean[:, roi_ids.index("full_frame")]`. **Delete the NaN padding step** and the `n_me_frames`/`padded` logic. Require `len(me) == n_frames_decoded` (`n_output_frames`) and refuse otherwise. The `padded` index column can go, or be recorded as always False. |
+| `code/build_me_table.py` | Download `<source>_motion_energy.npz` instead of `_motion_energy_clean.npy`; take `me_clean[:, roi_ids.index("full_frame")]`. **Delete the NaN padding step** and the `n_me_frames`/`padded` logic. Require `len(me) == n_frames_decoded` and refuse otherwise. The `padded` index column can go, or be recorded as always False. |
 | `code/check_leading_lost_frames.py` | Same load change. **Remove `np.concatenate([[np.nan], me])`** (line ~92). This script has no length check, so leaving the pad in would shift ME one frame late silently. |
-| `code/build_me_asset_map.py` | Replace the check `n_me_frames == n_frames_decoded - 1` (line ~115) with `n_output_frames == n_frames_decoded`, and look for `_motion_energy.npz` alongside `_me_metadata.json`. |
+| `code/build_me_asset_map.py` | Replace the check `n_me_frames == n_frames_decoded - 1` (line ~115) with a check that `_motion_energy.npz`'s `me` has `n_frames_decoded` rows, and look for `_motion_energy.npz` alongside `_me_metadata.json`. |
 | `code/fip_me_aligned_table_plan.md` | Update the "Padding" decision and step 2.6 ("pad a leading NaN…") to say the library now pads. |
 
 Not affected: `fip_utils.load_me` / `motion_energy_to_session`, `men_*`,

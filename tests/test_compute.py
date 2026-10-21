@@ -4,13 +4,8 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
-from aind_motion_energy.compute import (
-    MotionEnergyResult,
-    align_to_frames,
-    clean_trace,
-    compute_motion_energy,
-)
-from aind_motion_energy.rois import RoiSet
+from aind_motion_energy.compute import MotionEnergyResult, clean_trace, compute_motion_energy
+from aind_motion_energy.rois import box_roi
 
 
 def _info(width=4, height=3, n_frames=5, fps=30.0, bit_depth=8, codec_name="h264"):
@@ -26,8 +21,13 @@ def _info(width=4, height=3, n_frames=5, fps=30.0, bit_depth=8, codec_name="h264
 
 
 def _legacy(res: MotionEnergyResult):
-    """Full-frame view of a result, in the old (me, mask, avg_map, meta) shape."""
-    return res.me[:, 0], res.keyframe_mask, res.avg_map, res.metadata
+    """Full-frame per-diff view of a result: (me, mask, avg_map, meta) without row 0.
+
+    Row 0 (frame 0, no preceding frame) is checked to be NaN / False, then dropped.
+    """
+    if len(res.me):
+        assert np.isnan(res.me[0]).all() and not res.keyframe_mask[0]
+    return res.me[1:, 0], res.keyframe_mask[1:], res.avg_map, res.metadata
 
 
 def _frames(fills, keys=None, height=3, width=4):
@@ -103,14 +103,11 @@ def test_metadata_fields(mock_info, mock_iter):
     _, _, _, meta = _legacy(compute_motion_energy(Path("fake.mp4"), normalize=True))
 
     assert meta["n_frames_decoded"] == 3
-    assert meta["n_diffs"] == 2
-    assert "n_me_frames" not in meta
+    assert "n_me_frames" not in meta  # removed in 0.4.0 so old padding code fails loudly
     assert meta["fps"] == 60.0
     assert meta["codec_name"] == "h264"
     assert meta["normalized"] is True
     assert meta["n_rois"] == 0
-    assert meta["roi_ids"] == ["full_frame"]
-    assert meta["pixel_counts"] == [H * W]
     assert meta["width"] == W
     assert meta["height"] == H
 
@@ -222,27 +219,6 @@ def test_clean_trace_bad_method_raises():
         clean_trace(me, mask, method="bogus")
 
 
-def test_align_to_frames_pads_float_with_nan():
-    me = np.array([1.0, 2.0, 3.0], dtype=np.float32)
-    out = align_to_frames(me)
-    np.testing.assert_array_equal(out, [np.nan, 1.0, 2.0, 3.0])
-    assert out.dtype == np.float32
-
-
-def test_align_to_frames_bool_pads_false_not_nan():
-    # np.full(nan, dtype=bool) would give True; the default must give False.
-    mask = np.array([True, False])
-    np.testing.assert_array_equal(align_to_frames(mask), [False, True, False])
-
-
-def test_align_to_frames_2d_and_explicit_fill():
-    me2d = np.ones((3, 2), dtype=np.float32)
-    out = align_to_frames(me2d)
-    assert out.shape == (4, 2)
-    assert np.isnan(out[0]).all()
-    np.testing.assert_array_equal(align_to_frames(me2d, fill=0.0)[0], [0.0, 0.0])
-
-
 # --- ROIs ---------------------------------------------------------------------
 
 
@@ -257,24 +233,31 @@ def test_roi_columns_match_brute_force_masked_sums(mock_info, mock_iter):
     H, W = 6, 8
     frames = _roi_frames(h=H, w=W)
     rng = np.random.default_rng(1)
-    masks = rng.integers(0, 2, (H, W, 3), dtype=np.uint8)
-    masks[0, 0, :] = 1  # guarantee non-empty
-    rois = RoiSet.from_masks(masks, ["a", "b", "c"])
+    yy, xx = np.mgrid[:H, :W]
+    disk = (yy - 3) ** 2 + (xx - 4) ** 2 < 9
+    masks = np.stack(
+        [
+            rng.integers(0, 2, (H, W)).astype(bool) | (yy + xx == 0),  # scattered, overlapping
+            disk & ~((yy - 3) ** 2 + (xx - 4) ** 2 < 2),  # compound: a ring with a hole
+            (yy == 5) & (xx == 7),  # a single pixel
+        ],
+        axis=-1,
+    )
+    rois = {"a": masks[..., 0], "b": masks[..., 1], "c": masks[..., 2]}
     mock_info.return_value = _info(width=W, height=H, n_frames=len(frames))
     mock_iter.return_value = iter(frames)
 
     res = compute_motion_energy(Path("fake.mp4"), rois=rois, normalize=True)
 
     assert res.roi_ids == ("full_frame", "a", "b", "c")
-    assert res.me.shape == (len(frames) - 1, 4)
+    assert res.me.shape == (len(frames), 4)  # frame-aligned: one row per frame
+    assert np.isnan(res.me[0]).all()
     for i in range(1, len(frames)):
         diff = np.abs(frames[i][0].astype(int) - frames[i - 1][0].astype(int))
-        assert res.me[i - 1, 0] == pytest.approx(diff.mean())
+        assert res.me[i, 0] == pytest.approx(diff.mean())
         for k in range(3):
-            assert res.me[i - 1, k + 1] == pytest.approx(diff[masks[..., k] == 1].mean())
+            assert res.me[i, k + 1] == pytest.approx(diff[masks[..., k]].mean())
     np.testing.assert_array_equal(res.pixel_counts, [H * W, *masks.sum(axis=(0, 1))])
-    assert res.roi_bboxes.shape == (4, 4)
-    np.testing.assert_array_equal(res.roi_bboxes[0], [0, 0, W, H])
     assert res.avg_map.shape == (H, W)
     assert res.metadata["n_rois"] == 3
 
@@ -285,17 +268,18 @@ def test_box_roi_not_normalized_gives_raw_sum(mock_info, mock_iter):
     H, W = 10, 10
     mock_info.return_value = _info(width=W, height=H, n_frames=2)
     mock_iter.return_value = iter(_frames([0, 20], height=H, width=W))
-    rois = RoiSet.from_box((2, 2, 4, 3), (H, W))
+    rois = box_roi((2, 2, 4, 3), (H, W))
 
-    res = compute_motion_energy(Path("fake.mp4"), rois=rois, normalize=False)
+    res = compute_motion_energy(Path("fake.mp4"), rois=rois, normalize=False, start_frame=7)
 
-    np.testing.assert_allclose(res.me[0], [20.0 * H * W, 20.0 * 12])
+    np.testing.assert_allclose(res.me[1], [20.0 * H * W, 20.0 * 12])
+    assert res.first_frame == 7
 
 
 @patch("aind_motion_energy.compute.get_video_info")
 def test_roi_frame_shape_mismatch_raises(mock_info):
     mock_info.return_value = _info(width=8, height=6)
-    rois = RoiSet.from_box((0, 0, 2, 2), (10, 10))
+    rois = box_roi((0, 0, 2, 2), (10, 10))
     with pytest.raises(ValueError, match="10x10"):
         compute_motion_energy(Path("fake.mp4"), rois=rois)
 
@@ -305,7 +289,7 @@ def test_roi_frame_shape_mismatch_raises(mock_info):
 def test_empty_decode_gives_empty_traces(mock_info, mock_iter):
     mock_info.return_value = _info(width=4, height=3)
     mock_iter.return_value = iter([])
-    rois = RoiSet.from_box((0, 0, 2, 2), (3, 4))
+    rois = box_roi((0, 0, 2, 2), (3, 4))
 
     res = compute_motion_energy(Path("fake.mp4"), rois=rois)
 
@@ -337,12 +321,14 @@ def test_buffers_grow_when_probe_undercounts_frames(mock_info, mock_iter):
     mock_iter.return_value = iter(
         _frames(fills, keys=[False, False, False, True] + [False] * 3, height=2, width=2)
     )
-    rois = RoiSet.from_box((0, 0, 1, 1), (2, 2))
+    rois = box_roi((0, 0, 1, 1), (2, 2))
 
     res = compute_motion_energy(Path("fake.mp4"), rois=rois, normalize=False)
 
-    np.testing.assert_allclose(res.me, [[40.0, 10.0]] * 6)
-    np.testing.assert_array_equal(res.keyframe_mask, [False, False, True, True, False, False])
+    np.testing.assert_allclose(res.me[1:], [[40.0, 10.0]] * 6)
+    np.testing.assert_array_equal(
+        res.keyframe_mask, [False, False, False, True, True, False, False]
+    )
 
 
 @pytest.mark.parametrize(
@@ -359,3 +345,19 @@ def test_invalid_frame_range_raises_before_probing(start, end, match):
         with pytest.raises(ValueError, match=match):
             compute_motion_energy(Path("fake.mp4"), start_frame=start, end_frame=end)
     mock_info.assert_not_called()
+
+
+def test_clean_trace_ignores_nan_first_frame():
+    # Frame 0 is NaN; a keyframe diff right after it interpolates from later frames only.
+    me = np.array([np.nan, 99.0, 3.0, 4.0], dtype=np.float32)
+    mask = np.array([False, True, False, False])
+    out = clean_trace(me, mask)
+    assert np.isnan(out[0])
+    np.testing.assert_allclose(out[1:], [3.0, 3.0, 4.0])
+
+
+@patch("aind_motion_energy.compute.get_video_info")
+def test_huge_frames_refused(mock_info):
+    mock_info.return_value = _info(width=5000, height=4000)
+    with pytest.raises(ValueError, match="too large"):
+        compute_motion_energy(Path("fake.mp4"))

@@ -9,20 +9,22 @@ newest first. For *how to use* the library, see the README — this file is *why
   annotator rasterizes boxes, polygons and compound (add/subtract) shapes into
   `masks (H, W, K)` + `roi_ids`; `rois.py` never sees geometry. One code path
   covers every shape, and rasterization rules live in one place (the annotator).
-  `--roi X Y W H` is just `RoiSet.from_box`.
+  In Python a set of ROIs is a plain `dict` of name → `(H, W)` bool mask, and
+  `--roi X Y W H` is just a one-entry dict. (A compact `RoiSet` class with
+  bounding boxes and size guards was tried first and removed as more machinery
+  than the feature needed: 100 dense 720×540 masks are only ~40 MB.)
 - **One decode, one diff, one reduction call.** The full-frame diff is needed
   anyway (full-frame column + average map), so ROIs only add the reduction
   `np.add.reduceat(diff.ravel()[flat_idx], offsets, dtype=uint32)`, with
   `flat_idx` the concatenated mask pixel indices. No Python loop over ROIs; cost
-  is proportional to total masked pixels, not ROI count. That's why the size
-  guard is on total area (warn > 2× frame, refuse > 20×), not on K.
+  is proportional to total masked pixels, not ROI count.
 - **Kernel choice, measured** (720×540, 100 ROIs, 300k masked px, per frame):
   `take` + `reduceat(int64)` 2.6 ms; bbox crop + `sum(where=mask)` 2.5 ms;
   fancy index (`intp`) + `reduceat(int64)` 1.0 ms; fancy index +
   `reduceat(uint32)` **0.64 ms** (chosen). `take` and narrow index dtypes are
   ~4× slower than native-`intp` fancy indexing; int64 accumulation pays a cast
-  loop that uint32 avoids. uint32 is exact for any mask under 2³²/255 ≈ 16.8M px;
-  larger masks switch to uint64 automatically. End-to-end on the 15k-frame
+  loop that uint32 avoids. uint32 is exact for any mask under 2³²/255 ≈ 16.8M px,
+  so frames over 16.8 megapixels are refused. End-to-end on the 15k-frame
   sample clip, no ROIs matches 0.3.0 throughput, and 100 such ROIs run at ~55%
   of it (decode dominates the rest).
 - **Full-frame map accumulates in uint32**, not float64: exact (overflow only

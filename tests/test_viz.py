@@ -218,12 +218,12 @@ def test_save_summary_plots_accepts_str_output_dir(tmp_path):
 
 
 def _rois(h=8, w=10, k=2):
-    from aind_motion_energy.rois import RoiSet
-
-    masks = np.zeros((h, w, k), np.uint8)
+    rois = {}
     for i in range(k):
-        masks[i % h, : 2 + i % (w - 2), i] = 1
-    return RoiSet.from_masks(masks, [f"r{i}" for i in range(k)])
+        mask = np.zeros((h, w), bool)
+        mask[i % h, : 2 + i % (w - 2)] = True
+        rois[f"r{i}"] = mask
+    return rois
 
 
 @pytest.mark.parametrize("k", [2, 50])
@@ -242,7 +242,7 @@ def test_save_summary_plots_with_rois(tmp_path, k):
         me,
         np.zeros((60, 80), np.float32),
         fps=30.0,
-        roi_ids=["full_frame", *rois.ids],
+        roi_ids=["full_frame", *rois],
         keyframe_mask=mask,
         rois=rois,
         dpi=50,
@@ -272,7 +272,7 @@ def test_render_with_rois_and_selection(mock_iter, mock_open, tmp_path):
         fps_source=500.0,
         output_path=tmp_path / "viz.mp4",
         raw_trace=trace,
-        roi_ids=["full_frame", *rois.ids],
+        roi_ids=["full_frame", *rois],
         rois=rois,
         viz_rois=["r2", "r0"],  # no full_frame -> raw line dropped
         dpi=50,

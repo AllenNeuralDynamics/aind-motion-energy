@@ -9,7 +9,7 @@ import av
 import numpy as np
 
 from .io import iter_luma_frames
-from .rois import FULL_FRAME_ID, RoiSet
+from .rois import FULL_FRAME_ID
 
 _VIZ_IMPORT_HINT = (
     "Rendering motion-energy videos requires matplotlib. "
@@ -72,23 +72,20 @@ def _roi_color(plt: Any, roi_index: int) -> Any:
     return plt.get_cmap("tab10")(1 + roi_index % 9)
 
 
-def _draw_roi_outlines(plt: Any, ax: Any, rois: RoiSet, lw: float = 1.0) -> None:
+def _draw_roi_outlines(plt: Any, ax: Any, rois: dict[str, np.ndarray], lw: float = 1.0) -> None:
     """Outline each ROI's mask on an image axis and label it at its top-left corner."""
     from matplotlib import patheffects
 
-    for i, roi_id in enumerate(_short_labels(rois.ids)):
-        (x, y, w, h), cropped = rois.mask(i)
-        # Pad so masks touching their bbox edge still get a closed contour;
-        # coordinates are pixel centres, matching imshow.
-        padded = np.pad(cropped, 1).astype(np.float32)
-        xs = np.arange(x - 1, x + w + 1)
-        ys = np.arange(y - 1, y + h + 1)
+    for i, (mask, label) in enumerate(zip(rois.values(), _short_labels(list(rois)))):
+        rows, cols = np.nonzero(mask)
+        x, y = int(cols.min()), int(rows.min())
         color = _roi_color(plt, i)
         # A dark halo keeps outlines and labels legible on any background.
         halo = [patheffects.withStroke(linewidth=lw + 1.5, foreground="black")]
-        cs = ax.contour(xs, ys, padded, levels=[0.5], colors=[color], linewidths=lw)
+        # Contour coordinates are pixel centres, matching imshow.
+        cs = ax.contour(mask.astype(np.float32), levels=[0.5], colors=[color], linewidths=lw)
         cs.set(path_effects=halo)
-        ax.text(x, y - 2, roi_id, color=color, fontsize=7, va="bottom", path_effects=halo)
+        ax.text(x, y - 2, label, color=color, fontsize=7, va="bottom", path_effects=halo)
 
 
 def _zscore_binned(values: np.ndarray, max_bins: int) -> np.ndarray:
@@ -154,7 +151,7 @@ def save_summary_plots(
     fps: float,
     roi_ids: Sequence[str] | None = None,
     keyframe_mask: np.ndarray | None = None,
-    rois: RoiSet | None = None,
+    rois: dict[str, np.ndarray] | None = None,
     dpi: int = 150,
 ) -> tuple[Path, Path]:
     """Save two static PNG summaries for one video, meant for quick QC.
@@ -189,7 +186,7 @@ def save_summary_plots(
         Name of each column of `me`; defaults to ``full_frame, roi1, ...``.
     keyframe_mask : numpy.ndarray or None, optional
         Bool array of shape ``(T,)``; flagged frames are ticked on the trace.
-    rois : RoiSet or None, optional
+    rois : dict[str, numpy.ndarray] or None, optional
         ROIs to outline on the map.
     dpi : int, optional
         Resolution of the saved PNGs, by default 150.
@@ -360,7 +357,7 @@ def render_motion_energy_video(
     output_path: Path,
     raw_trace: np.ndarray | None = None,
     roi_ids: Sequence[str] | None = None,
-    rois: RoiSet | None = None,
+    rois: dict[str, np.ndarray] | None = None,
     viz_rois: Sequence[str] | None = None,
     start_frame: int | None = None,
     end_frame: int | None = None,
@@ -400,7 +397,7 @@ def render_motion_energy_video(
         see encoding spikes at their true amplitude and position.
     roi_ids : Sequence[str] or None, optional
         Name of each column of `trace`; defaults to ``full_frame, roi1, ...``.
-    rois : RoiSet or None, optional
+    rois : dict[str, numpy.ndarray] or None, optional
         ROIs to outline on the frame, coloured to match their traces.
     viz_rois : Sequence[str] or None, optional
         Ids of the traces to plot. By default the first five columns

@@ -2,7 +2,6 @@
 
 import argparse
 import csv
-import hashlib
 import json
 import os
 import shutil
@@ -12,15 +11,9 @@ from typing import Any
 
 import numpy as np
 
-from .compute import (
-    MotionEnergyResult,
-    align_to_frames,
-    check_frame_range,
-    clean_trace,
-    compute_motion_energy,
-)
+from .compute import MotionEnergyResult, check_frame_range, clean_trace, compute_motion_energy
 from .io import get_video_info
-from .rois import FULL_FRAME_ID, RoiSet, load_roi_masks
+from .rois import FULL_FRAME_ID, box_roi, check_rois, load_roi_masks
 
 # Bumped whenever the set or layout of saved files changes.
 OUTPUT_VERSION = 2
@@ -230,7 +223,7 @@ def _build_parser() -> argparse.ArgumentParser:
 class RoiSource:
     """The ROIs to apply to one video and where they came from."""
 
-    rois: RoiSet | None = None
+    rois: dict[str, np.ndarray] | None = None
     masks_path: Path | None = None
     box: tuple[int, int, int, int] | None = None
 
@@ -323,7 +316,7 @@ def resolve_rois(
     if roi_box is not None:
         for video in videos:
             info = get_video_info(video)
-            rois = RoiSet.from_box(roi_box, (info["height"], info["width"]))
+            rois = box_roi(roi_box, (info["height"], info["width"]))
             sources[video] = RoiSource(rois=rois, box=roi_box)
         return sources
     if masks_path is None:
@@ -346,7 +339,7 @@ def resolve_rois(
         rois = load_roi_masks(matches[0])
         info = get_video_info(video)
         try:
-            rois.check_frame_shape(info["height"], info["width"])
+            check_rois(rois, info["height"], info["width"])
         except ValueError as e:
             raise ValueError(f"{matches[0]} vs {video}: {e}") from e
         sources[video] = RoiSource(rois=rois, masks_path=matches[0])
@@ -374,34 +367,19 @@ def save_npz_atomic(path: Path, **arrays: np.ndarray) -> None:
         raise
 
 
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(1 << 20), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def _write_csv(
-    path: Path,
-    frame_index: np.ndarray,
-    result: MotionEnergyResult,
-    me: np.ndarray,
-    me_clean: np.ndarray,
-    keyframe_mask: np.ndarray,
-) -> None:
+def _write_csv(path: Path, result: MotionEnergyResult, me_clean: np.ndarray) -> None:
     header = ["frame_index", "is_keyframe"]
     for roi_id in result.roi_ids:
         header += [roi_id, f"{roi_id}_clean"]
     # Interleave raw/clean columns per ROI to match the header.
-    values = np.empty((len(me), 2 * me.shape[1]), dtype=np.float32)
-    values[:, 0::2] = me
+    values = np.empty((len(me_clean), 2 * me_clean.shape[1]), dtype=np.float32)
+    values[:, 0::2] = result.me
     values[:, 1::2] = me_clean
     with open(path, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(header)
         for i, row in enumerate(values):
-            writer.writerow([frame_index[i], keyframe_mask[i], *row])
+            writer.writerow([result.first_frame + i, result.keyframe_mask[i], *row])
 
 
 def _nanstat(fn: Any, values: np.ndarray) -> float:
@@ -414,7 +392,6 @@ def _roi_metadata(source: RoiSource) -> dict[str, Any]:
     return {
         "roi_box": list(source.box) if source.box else None,
         "roi_masks_path": str(source.masks_path) if source.masks_path else None,
-        "roi_masks_sha256": _sha256(source.masks_path) if source.masks_path else None,
     }
 
 
@@ -423,10 +400,9 @@ def _render_extras(
     args: argparse.Namespace,
     stem: str,
     result: MotionEnergyResult,
-    traces: tuple[np.ndarray, np.ndarray, np.ndarray],
-    rois: RoiSet | None,
+    me_clean: np.ndarray,
+    rois: dict[str, np.ndarray] | None,
 ) -> None:
-    me, me_clean, keyframe_mask = traces
     fps = result.metadata["fps"]
     if args.summary_plots:
         from .viz import save_summary_plots
@@ -434,12 +410,12 @@ def _render_extras(
         trace_png, map_png = save_summary_plots(
             args.output,
             stem,
-            me,
+            result.me,
             me_clean,
             result.avg_map,
             fps=fps,
             roi_ids=result.roi_ids,
-            keyframe_mask=keyframe_mask,
+            keyframe_mask=result.keyframe_mask,
             rois=rois,
         )
         print(f"  saved {trace_png.name}, {map_png.name}")
@@ -452,7 +428,7 @@ def _render_extras(
             me_clean,
             fps_source=fps,
             output_path=args.output / f"{stem}_motion_energy.mp4",
-            raw_trace=me,
+            raw_trace=result.me,
             roi_ids=result.roi_ids,
             rois=rois,
             viz_rois=_viz_selection(args.viz_rois, result.roi_ids),
@@ -492,7 +468,7 @@ def check_viz_rois(requested: list[str] | None, sources: dict[Path, RoiSource]) 
         return
     known = {FULL_FRAME_ID}
     for source in sources.values():
-        known.update(source.rois.ids if source.rois else ())
+        known.update(source.rois or ())
     unknown = sorted(set(requested) - known)
     if unknown:
         raise ValueError(f"--viz-rois {unknown} not found in any video's ROIs: {sorted(known)}")
@@ -511,55 +487,33 @@ def _process_video(video: Path, args: argparse.Namespace, source: RoiSource) -> 
     me_clean = clean_trace(result.me, result.keyframe_mask, method=args.clean_method)
     stem = camera_key(video)
 
-    # Frame-align at the output edge: one value per decoded frame. Frame 0 has no
-    # predecessor, so it's NaN in the traces and False in the keyframe mask.
-    me = align_to_frames(result.me)
-    me_clean = align_to_frames(me_clean)
-    keyframe_mask = align_to_frames(result.keyframe_mask)
-    first = args.start_frame or 0
-    frame_index = np.arange(first, first + len(me), dtype=np.int64)
-
     save_npz_atomic(
         args.output / f"{stem}_motion_energy.npz",
-        me=me,
+        me=result.me,
         me_clean=me_clean,
-        keyframe_mask=keyframe_mask,
+        keyframe_mask=result.keyframe_mask,
         # One number, not a per-row array: row i is video frame first_frame + i.
-        first_frame=np.array(first, dtype=np.int64),
+        first_frame=np.array(result.first_frame, dtype=np.int64),
         roi_ids=np.array(result.roi_ids, dtype=str),
         pixel_counts=result.pixel_counts,
-        roi_bboxes=result.roi_bboxes,
         avg_map=result.avg_map,
     )
     if source.masks_path is not None:
         shutil.copyfile(source.masks_path, args.output / f"{stem}_roi_masks.npz")
     if args.csv:
-        _write_csv(
-            args.output / f"{stem}_motion_energy.csv",
-            frame_index,
-            result,
-            me,
-            me_clean,
-            keyframe_mask,
-        )
+        _write_csv(args.output / f"{stem}_motion_energy.csv", result, me_clean)
 
-    meta = {
-        **result.metadata,
-        **_roi_metadata(source),
-        "output_version": OUTPUT_VERSION,
-        "n_output_frames": len(me),
-        "first_frame_fill": None,  # NaN; JSON has no NaN literal
-    }
+    meta = {**result.metadata, **_roi_metadata(source), "output_version": OUTPUT_VERSION}
     with open(args.output / f"{stem}_me_metadata.json", "w") as f:
         json.dump(meta, f, indent=2)
 
-    full = me[:, 0]
+    full = result.me[:, 0]
     print(
-        f"{stem}: {len(me)} frames | {len(result.roi_ids) - 1} ROIs | "
+        f"{stem}: {len(full)} frames | {len(result.roi_ids) - 1} ROIs | "
         f"{meta['n_keyframes_masked']} keyframes | "
         f"full_frame max={_nanstat(np.nanmax, full):.4f} mean={_nanstat(np.nanmean, full):.4f}"
     )
-    _render_extras(video, args, stem, result, (me, me_clean, keyframe_mask), source.rois)
+    _render_extras(video, args, stem, result, me_clean, source.rois)
 
 
 def main() -> None:
@@ -570,7 +524,7 @@ def main() -> None:
     the same output files, and loads and checks every video's ROIs
     (``--roi`` or ``--roi-masks``) before processing any of them. For each
     video it then writes ``{stem}_motion_energy.npz`` (whole-frame and per-ROI
-    traces, keyframe mask, ROI geometry, average motion map) and
+    traces, keyframe mask, ROI names and pixel counts, average motion map) and
     ``{stem}_me_metadata.json`` to ``--output``, plus a copy of the input
     masks. Optionally also writes CSV output, static summary plots, and a
     rendered visualization video, depending on the flags passed.

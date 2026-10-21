@@ -60,7 +60,7 @@ For each processed video, files are written to `--output` under a shared name st
 | File | Written when | Contents |
 |---|---|---|
 | `{stem}_motion_energy.npz` | always | All numeric outputs (below). |
-| `{stem}_me_metadata.json` | always | Video properties and processing parameters (fps, codec, dimensions, ROI ids and pixel counts, frame range, mask file path + SHA-256, `output_version`). |
+| `{stem}_me_metadata.json` | always | Video properties and processing parameters (fps, codec, dimensions, number of ROIs, frame range, mask file path, `output_version`). |
 | `{stem}_roi_masks.npz` | `--roi-masks` | Byte-for-byte copy of the input masks, for provenance. |
 | `{stem}_motion_energy.csv` | `--csv` | One row per frame: `frame_index, is_keyframe`, then `<id>, <id>_clean` for `full_frame` and each ROI. |
 | `{stem}_motion_energy.png` | `--summary-plots` | QC figure: full-frame trace (raw under clean, keyframes ticked) and, with ROIs, an ROI × time heatmap with each ROI z-scored. |
@@ -77,7 +77,6 @@ For each processed video, files are written to `--output` under a shared name st
 | `first_frame` | scalar int64 | Video frame number of row 0; row `i` is frame `first_frame + i`. |
 | `roi_ids` | `(1+K,)` str | Column names, starting with `full_frame`. |
 | `pixel_counts` | `(1+K,)` int64 | Pixels in each region (the normalization divisor). |
-| `roi_bboxes` | `(1+K, 4)` int32 | Each region's `(x, y, w, h)` bounding box. |
 | `avg_map` | `(H, W)` float32 | Whole-frame mean absolute difference per pixel, excluding keyframe-contaminated diffs. |
 
 ```python
@@ -93,7 +92,7 @@ Runs without ROIs use the same layout with `K = 0`. The file is a standard uncom
 
 ### Frame alignment
 
-Saved traces have one value per decoded frame. Each frame-to-frame diff `|f[i] - f[i-1]|` is assigned to the later frame `i`, and the first frame (which has no predecessor) is **NaN** (`False` in the keyframe mask; the metadata's `first_frame_fill` is `null`). Its motion energy is undefined rather than zero, so it can't be mistaken for a still frame. Use NaN-aware functions (`np.nanmean`, `np.nanstd`, `pandas` defaults) or drop row 0 before analysis. Index `i` of every output therefore lines up with video frame `start_frame + i` (`first_frame` in the NPZ; a `frame_index` column in the CSV), matching frame timestamps and other per-frame data. The library function `compute_motion_energy` still returns the raw per-diff arrays (length `N - 1`); `align_to_frames` performs the padding.
+Saved traces have one value per decoded frame. Each frame-to-frame diff `|f[i] - f[i-1]|` is assigned to the later frame `i`, and the first frame (which has no predecessor) is **NaN** (`False` in the keyframe mask). Its motion energy is undefined rather than zero, so it can't be mistaken for a still frame. Use NaN-aware functions (`np.nanmean`, `np.nanstd`, `pandas` defaults) or drop row 0 before analysis. Index `i` of every output therefore lines up with video frame `start_frame + i` (`first_frame` in the NPZ; a `frame_index` column in the CSV), matching frame timestamps and other per-frame data. `compute_motion_energy` returns the same frame-aligned arrays in Python.
 
 ## ROIs
 
@@ -106,16 +105,19 @@ uv run aind-motion-energy --input /data/session --roi-masks /data/session/rois -
 - **Matching.** With a directory, each video uses the file named `<camera>_masks.npz` or `<anything>_<camera>_masks.npz`, where `<camera>` is the video's `{stem}` (see below), compared ignoring case and separators. So the annotator's `…_BottomCamera_masks.npz` matches `bottom_camera.mp4`. Only whole `_`-separated parts count, and if several cameras fit one file name the longest wins. A camera with no file gets the whole-frame trace only, and mask files that match no video are listed, both as warnings; a camera matching several files is an error.
 - **Checked up front.** Every video's masks are loaded and checked against its frame size before any video is processed.
 - **Speed.** Each frame is decoded and differenced once; all ROIs are summed from that one diff in a single vectorized call, so cost grows with the total number of masked pixels, not the number of ROIs. On the 720×540 sample clip, 100 ROIs of ~3,000 px each run at ~55% of whole-frame-only throughput.
-- **Size guard.** A warning is printed when masks together cover more than 2× the frame area (and above 256 ROIs); more than 20× is refused as a likely bad export.
 
 From Python:
 
 ```python
 from aind_motion_energy import clean_trace, compute_motion_energy, load_roi_masks
 
-rois = load_roi_masks("rois/session_BottomCamera_masks.npz")
+rois = load_roi_masks("rois/session_BottomCamera_masks.npz")  # {name: (H, W) bool mask}
 result = compute_motion_energy("BottomCamera/video.mp4", rois=rois)
-me_clean = clean_trace(result.me, result.keyframe_mask)  # (N-1, 1+K), per diff
+me_clean = clean_trace(result.me, result.keyframe_mask)  # (N, 1+K), row 0 = NaN
+snout = me_clean[:, result.roi_ids.index("BottomCamera_snout_polygon")]
+```
+
+ROIs are a plain `dict` of name → boolean mask, so any mask works, e.g. `{"paw": my_mask}`.
 ```
 
 ### Camera-keying heuristic

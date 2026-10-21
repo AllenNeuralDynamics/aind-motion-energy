@@ -10,7 +10,9 @@ from aind_motion_energy.cli import main
 from aind_motion_energy.compute import MotionEnergyResult
 
 
-def _fake_compute_result(n=4, fps=30.0, roi_ids=("full_frame",), me=None, keyframe_mask=None):
+def _fake_compute_result(
+    n=4, fps=30.0, roi_ids=("full_frame",), me=None, keyframe_mask=None, first_frame=0
+):
     k = len(roi_ids)
     if me is None:
         me = np.arange(n * k, dtype=np.float32).reshape(n, k)
@@ -19,9 +21,9 @@ def _fake_compute_result(n=4, fps=30.0, roi_ids=("full_frame",), me=None, keyfra
     return MotionEnergyResult(
         me=me,
         keyframe_mask=keyframe_mask,
+        first_frame=first_frame,
         roi_ids=tuple(roi_ids),
         pixel_counts=np.full(k, 4, dtype=np.int64),
-        roi_bboxes=np.zeros((k, 4), dtype=np.int32),
         avg_map=np.zeros((2, 2), dtype=np.float32),
         metadata={"fps": fps, "n_keyframes_masked": int(keyframe_mask.sum())},
     )
@@ -93,8 +95,9 @@ def test_optional_flags_pass_through_to_compute(
     main()
 
     _, kwargs = mock_compute.call_args
-    assert kwargs["rois"].ids == ("roi",)
-    np.testing.assert_array_equal(kwargs["rois"].bboxes[0], [1, 2, 3, 4])
+    assert list(kwargs["rois"]) == ["roi"]
+    rows, cols = np.nonzero(kwargs["rois"]["roi"])  # --roi 1 2 3 4 is x=1, y=2, w=3, h=4
+    assert (cols.min(), rows.min(), np.ptp(cols) + 1, np.ptp(rows) + 1) == (1, 2, 3, 4)
     assert kwargs["normalize"] is False
     assert kwargs["start_frame"] == 5
     assert kwargs["end_frame"] == 50
@@ -354,31 +357,26 @@ def test_visualize_flag_invokes_render_motion_energy_video(
 
 
 @patch("aind_motion_energy.cli.compute_motion_energy")
-def test_outputs_are_frame_aligned(mock_compute, monkeypatch, tmp_path):
+def test_frame_aligned_result_saved_as_is(mock_compute, monkeypatch, tmp_path):
     video = tmp_path / "clip.mp4"
     video.touch()
     out = tmp_path / "out"
-    me = np.array([[5.0], [6.0], [7.0]], dtype=np.float32)  # 4 frames -> 3 diffs
-    mask = np.array([False, True, False])
-    mock_compute.return_value = _fake_compute_result(me=me, keyframe_mask=mask)
+    me = np.array([[np.nan], [5.0], [6.0], [7.0]], dtype=np.float32)  # compute pads row 0
+    mask = np.array([False, False, True, False])
+    mock_compute.return_value = _fake_compute_result(me=me, keyframe_mask=mask, first_frame=10)
 
     argv = ["prog", "--input", str(video), "--output", str(out), "--csv"]
     monkeypatch.setattr(sys, "argv", argv + ["--start-frame", "10"])
     main()
 
     with np.load(out / "clip_motion_energy.npz") as f:
-        np.testing.assert_array_equal(f["me"][:, 0], [np.nan, 5.0, 6.0, 7.0])
+        np.testing.assert_array_equal(f["me"][:, 0], [np.nan, 5.0, 6.0, 7.0])  # not padded twice
         assert np.isnan(f["me_clean"][0]).all()
-        np.testing.assert_array_equal(f["keyframe_mask"], [False, False, True, False])
+        np.testing.assert_array_equal(f["keyframe_mask"], mask)
         assert f["first_frame"] == 10 and f["first_frame"].shape == ()
     with open(out / "clip_motion_energy.csv") as f:
         rows = list(csv.reader(f))
     assert [r[0] for r in rows[1:]] == ["10", "11", "12", "13"]
-    meta = json.loads((out / "clip_me_metadata.json").read_text())
-    assert meta["n_output_frames"] == 4
-    assert meta["first_frame_fill"] is None
-    # Old readers padded when n_me_frames == n_frames_decoded - 1; the key is gone so they fail.
-    assert "n_me_frames" not in meta
     assert rows[1][2] == "nan"
 
 
@@ -403,10 +401,9 @@ def test_npz_contents_and_metadata_without_rois(mock_compute, monkeypatch, tmp_p
             "first_frame",
             "roi_ids",
             "pixel_counts",
-            "roi_bboxes",
             "avg_map",
         }
-        assert f["me"].shape == (5, 1)
+        assert f["me"].shape == (4, 1)
         assert f["roi_ids"].tolist() == ["full_frame"]
     assert mock_compute.call_args.kwargs["rois"] is None
     meta = json.loads((out / "clip_me_metadata.json").read_text())
@@ -463,12 +460,11 @@ def test_roi_masks_dir_matched_by_camera_and_recorded(
     main()
 
     by_video = {c.args[0].parent.name: c.kwargs["rois"] for c in mock_compute.call_args_list}
-    assert by_video["BottomCamera"].ids == ("Snout", "Pupil")
+    assert list(by_video["BottomCamera"]) == ["Snout", "Pupil"]
     assert by_video["SideCamera"] is None
     assert (out / "BottomCamera_roi_masks.npz").read_bytes() == masks_file.read_bytes()
     meta = json.loads((out / "BottomCamera_me_metadata.json").read_text())
     assert meta["roi_masks_path"] == str(masks_file)
-    assert len(meta["roi_masks_sha256"]) == 64
     with open(out / "BottomCamera_motion_energy.csv") as f:
         header = next(csv.reader(f))
     assert header == [
@@ -546,7 +542,7 @@ def test_single_masks_file_for_single_video(mock_compute, mock_info, monkeypatch
     monkeypatch.setattr(sys, "argv", argv + ["--roi-masks", str(masks_file)])
     main()
 
-    assert mock_compute.call_args.kwargs["rois"].ids == ("Snout", "Pupil")
+    assert list(mock_compute.call_args.kwargs["rois"]) == ["Snout", "Pupil"]
 
 
 @patch("aind_motion_energy.cli.compute_motion_energy")
@@ -597,7 +593,7 @@ def test_viz_rois_filtered_per_video(mock_compute, mock_info, mock_render, monke
     out.mkdir()
 
     def fake_compute(video, rois=None, **kwargs):
-        ids = ("full_frame", *rois.ids) if rois else ("full_frame",)
+        ids = ("full_frame", *(rois or ()))
         return _fake_compute_result(roi_ids=ids)
 
     mock_compute.side_effect = fake_compute
@@ -652,7 +648,7 @@ def test_summary_line_with_no_diffs(mock_compute, monkeypatch, tmp_path, capsys)
     main()
 
     out = capsys.readouterr().out
-    assert "1 frames" in out and "max=nan mean=nan" in out
+    assert "0 frames" in out and "max=nan mean=nan" in out
 
 
 def test_assign_mask_files_ignores_case_and_separators(tmp_path):
