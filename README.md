@@ -41,7 +41,7 @@ uv run aind-motion-energy --input data/my_video.mp4 --output results/ --summary-
 | `--roi X Y W H` | none | One rectangular ROI in pixels, saved as ROI `roi`. Mutually exclusive with `--roi-masks`. |
 | `--roi-masks PATH` | none | ROI annotator mask files: a directory of `*_<camera>_masks.npz` files (matched to each video by camera name), or one masks file when `--input` is a single video. See [ROIs](#rois). |
 | `--no-normalize` | off | Skip per-pixel normalization (output raw summed differences instead of dividing each trace by its region's pixel count). |
-| `--format {npz,csv,both}` | `npz` | `csv` or `both` also write a wide per-frame CSV; the NPZ is always written. |
+| `--csv` | off | Also write a wide per-frame CSV. The NPZ is always written. |
 | `--start-frame` | `0` | First frame to process (inclusive, 0-indexed). |
 | `--end-frame` | end of video | Last frame to process (exclusive). |
 | `--no-mask-keyframes` | off | Disable detection of H.264/HEVC keyframe-contaminated diffs. |
@@ -62,7 +62,7 @@ For each processed video, files are written to `--output` under a shared name st
 | `{stem}_motion_energy.npz` | always | All numeric outputs (below). |
 | `{stem}_me_metadata.json` | always | Video properties and processing parameters (fps, codec, dimensions, ROI ids and pixel counts, frame range, mask file path + SHA-256, `output_version`). |
 | `{stem}_roi_masks.npz` | `--roi-masks` | Byte-for-byte copy of the input masks, for provenance. |
-| `{stem}_motion_energy.csv` | `--format csv` or `both` | One row per frame: `frame_index, is_keyframe`, then `<id>, <id>_clean` for `full_frame` and each ROI. |
+| `{stem}_motion_energy.csv` | `--csv` | One row per frame: `frame_index, is_keyframe`, then `<id>, <id>_clean` for `full_frame` and each ROI. |
 | `{stem}_motion_energy.png` | `--summary-plots` | QC figure: full-frame trace (raw under clean, keyframes ticked) and, with ROIs, an ROI × time heatmap with each ROI z-scored. |
 | `{stem}_motion_energy_map.png` | `--summary-plots` | Average motion map with ROI outlines. |
 | `{stem}_motion_energy.mp4` | `--visualize` | Rendered video with ROI outlines and synced, scrolling traces. |

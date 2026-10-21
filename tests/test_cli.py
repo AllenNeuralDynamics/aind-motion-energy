@@ -275,20 +275,20 @@ def test_same_filename_in_distinct_camera_folders_does_not_collide(
     assert (out / "SideCameraRight_motion_energy.npz").exists()
 
 
-# --- --format branches --------------------------------------------------------
+# --- --csv flag ---------------------------------------------------------------
 
 
-@pytest.mark.parametrize("fmt,expect_csv", [("npz", False), ("csv", True), ("both", True)])
+@pytest.mark.parametrize("flags,expect_csv", [([], False), (["--csv"], True)])
 @patch("aind_motion_energy.cli.clean_trace")
 @patch("aind_motion_energy.cli.compute_motion_energy")
-def test_format_branches(mock_compute, mock_clean, monkeypatch, tmp_path, fmt, expect_csv):
+def test_csv_flag(mock_compute, mock_clean, monkeypatch, tmp_path, flags, expect_csv):
     video = tmp_path / "clip.mp4"
     video.touch()
     out = tmp_path / "out"
     mock_compute.return_value = _fake_compute_result()
     mock_clean.return_value = np.zeros((4, 1), dtype=np.float32)
 
-    argv = ["prog", "--input", str(video), "--output", str(out), "--format", fmt]
+    argv = ["prog", "--input", str(video), "--output", str(out), *flags]
     monkeypatch.setattr(sys, "argv", argv)
     main()
 
@@ -362,7 +362,7 @@ def test_outputs_are_frame_aligned(mock_compute, monkeypatch, tmp_path):
     mask = np.array([False, True, False])
     mock_compute.return_value = _fake_compute_result(me=me, keyframe_mask=mask)
 
-    argv = ["prog", "--input", str(video), "--output", str(out), "--format", "both"]
+    argv = ["prog", "--input", str(video), "--output", str(out), "--csv"]
     monkeypatch.setattr(sys, "argv", argv + ["--start-frame", "10"])
     main()
 
@@ -459,7 +459,7 @@ def test_roi_masks_dir_matched_by_camera_and_recorded(
     mock_compute.return_value = _fake_compute_result(roi_ids=("full_frame", "Snout", "Pupil"))
 
     argv = ["prog", "--input", str(input_dir), "--output", str(out), "--roi-masks", str(masks_dir)]
-    monkeypatch.setattr(sys, "argv", argv + ["--format", "csv"])
+    monkeypatch.setattr(sys, "argv", argv + ["--csv"])
     main()
 
     by_video = {c.args[0].parent.name: c.kwargs["rois"] for c in mock_compute.call_args_list}

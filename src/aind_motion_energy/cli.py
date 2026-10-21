@@ -154,10 +154,9 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Skip per-pixel normalization (output raw summed differences)",
     )
     parser.add_argument(
-        "--format",
-        choices=["npz", "csv", "both"],
-        default="npz",
-        help="Output format (default: npz)",
+        "--csv",
+        action="store_true",
+        help="Also write a wide per-frame CSV (the NPZ is always written)",
     )
     parser.add_argument(
         "--start-frame",
@@ -528,7 +527,7 @@ def _process_video(video: Path, args: argparse.Namespace, source: RoiSource) -> 
     )
     if source.masks_path is not None:
         shutil.copyfile(source.masks_path, args.output / f"{stem}_roi_masks.npz")
-    if args.format in ("csv", "both"):
+    if args.csv:
         _write_csv(
             args.output / f"{stem}_motion_energy.csv",
             frame_index,

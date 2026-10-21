@@ -17,6 +17,8 @@ against each repo's state on 2026-10-21.
   deliberate: code that pads when `n_me_frames == n_frames_decoded - 1` now
   fails with a `KeyError` instead of silently padding twice. Use
   `n_output_frames`, which equals `n_frames_decoded` for a whole-video run.
+- `--format {npy,csv,both}` is replaced by a `--csv` flag (the NPZ is always
+  written). Callers passing `--format csv` or `--format both` must switch to `--csv`.
 - The Python API changed: `compute_motion_energy` returns a `MotionEnergyResult`
   (not a 4-tuple), and takes `rois=` instead of `roi=`.
 
@@ -42,7 +44,7 @@ entry), so `load_me` can return a chosen ROI instead of only the whole frame.
 | File | Change |
 |---|---|
 | `environment/` pin | Pin `aind-motion-energy` 0.4.0 (after release). |
-| `README.md` outputs table | Replace the four `.npy` rows with `{stem}_motion_energy.npz` and `{stem}_roi_masks.npz`; describe the frame alignment and NaN row 0. Add `--roi-masks` and `--viz-rois` to the list of flags passed via `"$@"`. |
+| `README.md` outputs table | Replace the four `.npy` rows with `{stem}_motion_energy.npz` and `{stem}_roi_masks.npz`; describe the frame alignment and NaN row 0. Add `--roi-masks` and `--viz-rois` to the list of flags passed via `"$@"`, and replace `--format` with `--csv` (README lines 41 and 54). |
 | Data mounts | For ROI runs, mount the session's mask files (a folder of `*_<camera>_masks.npz`) and pass `--roi-masks <that folder>` via `"$@"`. `code/run` itself needs no change. |
 | `examples/example_motion_energy.ipynb` | `me, keyframe_mask, avg_map, meta = compute_motion_energy(...)` → `result = compute_motion_energy(...)`, then `result.me[:, 0]`, `result.keyframe_mask`, `result.avg_map`, `result.metadata`. |
 
