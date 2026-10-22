@@ -111,9 +111,11 @@ Empty masks are rejected at load time, because `reduceat` misbehaves on zero-len
 - `docs/optimization-backlog.md`: update the map item (uint32 accumulator), and add the rectangle fast path, summed-area table and sparse matmul.
 - Bump to 0.4.0. **[as built]** Deferred to a separate `chore:` PR, matching how this repo has done past bumps (#44).
 - Update `examples/` notebook for the new outputs.
-- Follow-ups in other repos, which this PR does not touch:
-  - **`aind-motion-energy-capsule`:** pass through `--roi-masks`, and read the new NPZ.
-  - **`aind-motion-energy-batch`:** stage the mask files per session.
+- Follow-ups in other repos, which this PR does not touch. **[done 2026-10-22]**
+  - **`aind-motion-energy-capsule`:** pinned to `v0.4.0` (PR #12): README outputs and flags, and the example notebook on `MotionEnergyResult`. `code/run` needed no change; `--roi-masks` arrives via `"$@"`. A 5,000-frame test run matched the 0.3.0 trace shifted by one row. No capsule version is released; runs use the capsule's current state.
+  - **`aind-motion-energy-batch`:** ROIs are set **per batch**, not per session (PR #20): a batch file `{"roi_masks_asset": "<id>", "sessions": [...]}` mounts one mask asset (one `*_<camera>_masks.npz` per camera) at `/root/capsule/data/roi_masks` in every run and passes `--roi-masks`. The skip-if-done check does not tell versions or ROI runs apart; reruns use `--force`.
+  - **`kinematics_analysis`:** `code/me_results.py` reads 0.3.0 (`.npy`, pad a leading NaN) and 0.4.0 (`.npz`, already aligned) results by `output_version`, so neither is padded twice. `build_me_table.py`, `build_me_asset_map.py` and `check_leading_lost_frames.py` use it. ROI columns in the aligned table and an ROI argument to `fip_utils.load_me` are open in that repo's `code/fip_todo.md`.
+  - The ROI annotator's box-ROI export (`export_rois.py` reading `x/y/w/h` instead of `bbox`) was left as is.
 - **Known mismatch to document:** in flat layouts, the annotator's camera name (its stem heuristic picks the longest token) can differ from `camera_key` (the full stem). The directory-mode error message should tell the user to rename the mask file to `*_{camera_key}_masks.npz`, or to use file mode.
 
 ## Suggested PR sequence
